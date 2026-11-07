@@ -147,3 +147,58 @@ describe('POST /imports/transactions', () => {
     expect((await api('POST', '/imports/transactions', { token: u.device, body: { items: 'x' } })).status).toBe(400);
   });
 });
+
+describe('posibles duplicados de compras digitadas a mano', () => {
+  // Movimiento manual de $12.490 el 2026-11-03 con la tarjeta ····4082 (categoría Salud).
+  async function withManual() {
+    const u = await setupUser('dup');
+    const manual = await u.post('/transactions', { date: '2026-11-03', type: 'egreso', amount: 12490, description: 'Farmacia', instrumentId: u.card.id, categoryId: u.category.id });
+    return { ...u, manual };
+  }
+  const on = (day: string, o: Record<string, unknown> = {}) => ({ purchasedAt: `2026-11-${day}T15:00:00-03:00`, ...o });
+  const count = async (token: string) => (await api('GET', '/transactions?pageSize=100', { token })).json.total as number;
+
+  test('misma tarjeta y monto a ±1 día: posible duplicado con el movimiento parecido, sin crear nada', async () => {
+    const u = await withManual();
+    const before = await count(u.user.token);
+    const results = (await importItems(u.device, ['02', '03', '04'].map((d) => item(u.category.id, on(d))))).json.results;
+    expect(results.map((r: any) => r.status)).toEqual(['possible_duplicate', 'possible_duplicate', 'possible_duplicate']);
+    expect(results[0].matches).toEqual([{ transactionId: u.manual.id, date: '2026-11-03', amount: 12490, description: 'Farmacia', categoryName: 'Salud' }]);
+    expect(results[0].transactionId).toBeUndefined();
+    expect(await count(u.user.token)).toBe(before);
+  });
+
+  test('fuera de rango, otro monto u otra tarjeta: se crea', async () => {
+    const u = await withManual();
+    await u.post('/instruments', { type: 'tarjeta_credito', bank: 'Otro', last4: '1111' });
+    const results = (
+      await importItems(u.device, [item(u.category.id, on('05')), item(u.category.id, on('03', { amountMinor: 12491 })), item(u.category.id, on('03', { cardLast4: '1111' }))])
+    ).json.results;
+    expect(results.map((r: any) => r.status)).toEqual(['created', 'created', 'created']);
+  });
+
+  test('confirmDuplicate lo registra igual', async () => {
+    const u = await withManual();
+    const r = (await importItems(u.device, [item(u.category.id, on('03', { confirmDuplicate: true }))])).json.results[0];
+    expect(r.status).toBe('created');
+  });
+
+  test('un manual borrado no cuenta', async () => {
+    const u = await withManual();
+    await api('DELETE', `/transactions/${u.manual.id}`, { token: u.user.token });
+    expect((await importItems(u.device, [item(u.category.id, on('03'))])).json.results[0].status).toBe('created');
+  });
+
+  test('otro importado parecido no cuenta (esos los controla externalId)', async () => {
+    const u = await setupUser('dupimp');
+    const first = (await importItems(u.device, [item(u.category.id, on('10'))])).json.results[0];
+    const second = (await importItems(u.device, [item(u.category.id, on('10'))])).json.results[0];
+    expect([first.status, second.status]).toEqual(['created', 'created']);
+  });
+
+  test('el resumen cuenta los posibles duplicados', async () => {
+    const u = await withManual();
+    const r = (await importItems(u.device, [item(u.category.id, on('03')), item(u.category.id, on('20'))])).json;
+    expect(r.summary).toMatchObject({ possible_duplicate: 1, created: 1 });
+  });
+});

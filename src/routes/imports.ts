@@ -19,6 +19,7 @@ interface ItemResult {
   transactionId?: string;
   budgetMonth?: string;
   error?: { code: string; message: string; details?: unknown };
+  matches?: { transactionId: string; date: string; amount: number; description: string; categoryName: string | null }[];
 }
 
 const reject = (base: Pick<ItemResult, 'index' | 'externalId'>, code: string, message: string, details?: unknown): ItemResult => ({
@@ -29,7 +30,7 @@ const reject = (base: Pick<ItemResult, 'index' | 'externalId'>, code: string, me
 
 /**
  * Procesa una compra. Orden: validación → repetida en el lote → ya importada (por externalId) →
- * instrumento → categoría → crear. `seen` guarda el primer resultado de cada externalId del lote.
+ * instrumento → categoría → posible duplicado de una digitada a mano → crear. `seen` guarda el primer resultado de cada externalId del lote.
  */
 async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen: Map<string, ItemResult>): Promise<ItemResult> {
   const parsed = importItem.safeParse(raw);
@@ -69,6 +70,29 @@ async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen
   if (!category.rowCount) return reject(base, 'invalid_category', 'La categoría no existe, está archivada o no es tuya.');
 
   const date = localDate(it.purchasedAt, config.timezone);
+  const amount = toClpAmount(it.amountMinor, it.currency);
+
+  // ¿Ya la digitó a mano? Misma tarjeta y monto, a ±1 día. Sin confirmación no se crea: decide el usuario.
+  if (!it.confirmDuplicate) {
+    const similar = await c.query(
+      `SELECT t.id, t.occurred_on, t.amount, t.description, c.name AS category_name
+         FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+        WHERE t.user_id = $1 AND t.source = 'manual' AND t.deleted_at IS NULL
+          AND t.instrument_id = $2 AND t.amount = $3
+          AND t.occurred_on BETWEEN $4::date - 1 AND $4::date + 1
+        ORDER BY abs(t.occurred_on - $4::date), t.occurred_on
+        LIMIT 5`,
+      [auth.userId, instrumentId, amount, date],
+    );
+    if (similar.rowCount) {
+      return {
+        ...base,
+        status: 'possible_duplicate',
+        matches: similar.rows.map((r) => ({ transactionId: r.id, date: r.occurred_on, amount: r.amount, description: r.description, categoryName: r.category_name })),
+      };
+    }
+  }
+
   await c.query('SAVEPOINT import_item');
   try {
     const { rows } = await c.query(
@@ -79,7 +103,7 @@ async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen
         auth.householdId,
         auth.userId,
         date,
-        toClpAmount(it.amountMinor, it.currency),
+        amount,
         it.categoryId,
         instrumentId,
         importDescription(it.merchant, it.cardLast4, it.amountMinor, it.currency),

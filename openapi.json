@@ -1698,7 +1698,7 @@
         ],
         "operationId": "importTransactions",
         "summary": "Importar compras capturadas por la app",
-        "description": "Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`. Para la app, `created`, `exists` y `discarded` significan \"no reenviar\". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.",
+        "description": "Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un movimiento digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan \"no reenviar\". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.",
         "security": [
           {
             "bearerAuth": []
@@ -2983,6 +2983,47 @@
               "message"
             ],
             "additionalProperties": false
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transactionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "YYYY-MM-DD"
+                },
+                "amount": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "categoryName": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "transactionId",
+                "date",
+                "amount",
+                "description",
+                "categoryName"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -3158,6 +3199,7 @@
                   "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                 },
                 "confirmDuplicate": {
+                  "description": "true = registrarla aunque se parezca a un movimiento digitado a mano",
                   "type": "boolean"
                 }
               },

@@ -91,7 +91,7 @@ export const importItem = z.object({
   merchant: z.string().max(200).nullable().optional(),
   cardLast4: z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos'),
   categoryId: uuid,
-  confirmDuplicate: z.boolean().optional(),
+  confirmDuplicate: z.boolean().optional().describe('true = registrarla aunque se parezca a un movimiento digitado a mano'),
 });
 export const IMPORT_MAX_ITEMS = 200;
 export const importBody = z.object({ items: z.array(z.unknown()).min(1).max(IMPORT_MAX_ITEMS) });
