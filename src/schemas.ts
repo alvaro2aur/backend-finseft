@@ -95,5 +95,6 @@ export const importItem = z.object({
 });
 export const IMPORT_MAX_ITEMS = 200;
 export const importBody = z.object({ items: z.array(z.unknown()).min(1).max(IMPORT_MAX_ITEMS) });
+export const suggestionsBody = z.object({ merchants: z.array(z.string().max(200)).min(1).max(IMPORT_MAX_ITEMS) });
 /** Solo para documentar el cuerpo en el OpenAPI (la validación real es por elemento). */
 export const importBodyDoc = z.object({ items: z.array(importItem).min(1).max(IMPORT_MAX_ITEMS) });

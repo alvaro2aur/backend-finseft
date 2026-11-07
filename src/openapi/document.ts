@@ -162,6 +162,7 @@ const schemas: Record<string, Json> = {
     },
     ['index', 'status'],
   ),
+  Suggestions: obj({ suggestions: arr(obj({ merchant: str({ description: 'Tal como se envió' }), categoryId: nullable(uuid()), uses: int({ description: 'Veces que se usó esa categoría para el comercio en los últimos 12 meses' }) })) }),
   ImportResponse: obj({
     results: arr(ref('ImportResult')),
     summary: obj({ created: int(), exists: int(), discarded: int(), rejected: int(), possible_duplicate: int() }),
@@ -174,6 +175,7 @@ const schemas: Record<string, Json> = {
 const bodies = {
   CreateDeviceRequest: S.createDeviceBody,
   ImportTransactionsRequest: S.importBodyDoc,
+  SuggestionsRequest: S.suggestionsBody,
   RegisterRequest: S.registerBody,
   LoginRequest: S.loginBody,
   GoogleLoginRequest: S.googleBody,
@@ -428,6 +430,19 @@ const paths: Record<string, Json> = {
         'Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un movimiento digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan "no reenviar". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.',
       body: 'ImportTransactionsRequest',
       ok: [200, 'Resultado por compra', ref('ImportResponse')],
+      device: true,
+    }),
+  },
+
+  '/imports/suggestions': {
+    post: op({
+      tag: 'Importación',
+      id: 'suggestCategories',
+      summary: 'Sugerir categoría por comercio',
+      description:
+        'Para cada comercio (hasta 200), la categoría que el usuario más usó para él en los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.',
+      body: 'SuggestionsRequest',
+      ok: [200, 'Sugerencias, en el mismo orden', ref('Suggestions')],
       device: true,
     }),
   },

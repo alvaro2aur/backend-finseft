@@ -202,3 +202,68 @@ describe('posibles duplicados de compras digitadas a mano', () => {
     expect(r.summary).toMatchObject({ possible_duplicate: 1, created: 1 });
   });
 });
+
+describe('POST /imports/suggestions', () => {
+  const suggest = (token: string, merchants: unknown) => api('POST', '/imports/suggestions', { token, body: { merchants } });
+  const manual = (u: Awaited<ReturnType<typeof setupUser>>, description: string, categoryId: string, date = '2026-10-10') =>
+    u.post('/transactions', { date, type: 'egreso', amount: 1000, description, instrumentId: u.card.id, categoryId });
+
+  test('sugiere la categoría más usada para el comercio; sin historial, null', async () => {
+    const u = await setupUser('sug');
+    const merc = await u.post('/categories', { name: 'Mercadería' });
+    const otros = await u.post('/categories', { name: 'Otros' });
+    for (const d of ['2026-10-01', '2026-10-02', '2026-10-03']) await manual(u, 'LIDER EXPRESS', merc.id, d);
+    await manual(u, 'Lider Express', otros.id, '2026-10-04');
+    const r = await suggest(u.device, ['  Lider   Express', 'Desconocido']);
+    expect(r.status).toBe(200);
+    expect(r.json.suggestions).toEqual([
+      { merchant: '  Lider   Express', categoryId: merc.id, uses: 3 },
+      { merchant: 'Desconocido', categoryId: null, uses: 0 },
+    ]);
+  });
+
+  test('ante empate gana la categoría usada más recientemente', async () => {
+    const u = await setupUser('sugtie');
+    const a = await u.post('/categories', { name: 'A' });
+    const b = await u.post('/categories', { name: 'B' });
+    await manual(u, 'CAFE X', a.id, '2026-10-01');
+    await manual(u, 'CAFE X', b.id, '2026-10-05');
+    expect((await suggest(u.device, ['cafe x'])).json.suggestions[0]).toEqual({ merchant: 'cafe x', categoryId: b.id, uses: 1 });
+  });
+
+  test('no cuentan movimientos de hace más de 12 meses, de categorías archivadas ni borrados', async () => {
+    const u = await setupUser('sugold');
+    const old = await u.post('/categories', { name: 'Vieja' });
+    const archived = await u.post('/categories', { name: 'Archivada' });
+    await manual(u, 'VIEJO', old.id, '2025-10-01');
+    await manual(u, 'ARCHIVADO', archived.id);
+    await api('DELETE', `/categories/${archived.id}`, { token: u.user.token });
+    const del = await manual(u, 'BORRADO', u.category.id);
+    await api('DELETE', `/transactions/${del.id}`, { token: u.user.token });
+    const s = (await suggest(u.device, ['viejo', 'archivado', 'borrado'])).json.suggestions;
+    expect(s.map((x: any) => x.categoryId)).toEqual([null, null, null]);
+  });
+
+  test('un importado en otra moneda cuenta para su comercio', async () => {
+    const u = await setupUser('sugusd');
+    await importItems(u.device, [item(u.category.id, { currency: 'USD', amountMinor: 1234, merchant: 'AMAZON' })]);
+    expect((await suggest(u.device, ['Amazon'])).json.suggestions[0]).toEqual({ merchant: 'Amazon', categoryId: u.category.id, uses: 1 });
+  });
+
+  test('no usa los movimientos de otros miembros del grupo', async () => {
+    const a = await setupUser('sugowner');
+    const b = await setupUser('sugmember');
+    await api('POST', '/household/invitations', { token: a.user.token, body: { email: b.email } });
+    await api('POST', '/household/invitations/accept', { token: b.user.token, body: { token: lastMailToken(b.email) } });
+    const shared = await a.post('/categories', { name: 'Compartida', scope: 'shared' });
+    await api('POST', '/transactions', { token: b.user.token, body: { date: '2026-10-10', type: 'egreso', amount: 1000, description: 'SOLO DE B', instrumentId: b.card.id, categoryId: shared.id } });
+    expect((await suggest(a.device, ['solo de b'])).json.suggestions[0].categoryId).toBeNull();
+    expect((await suggest(b.device, ['solo de b'])).json.suggestions[0].categoryId).toBe(shared.id);
+  });
+
+  test('una lista vacía o de más de 200 es inválida', async () => {
+    const u = await setupUser('sugval');
+    expect((await suggest(u.device, [])).status).toBe(400);
+    expect((await suggest(u.device, Array.from({ length: 201 }, (_, i) => `m${i}`))).status).toBe(400);
+  });
+});

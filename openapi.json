@@ -1740,6 +1740,55 @@
         }
       }
     },
+    "/imports/suggestions": {
+      "post": {
+        "tags": [
+          "Importación"
+        ],
+        "operationId": "suggestCategories",
+        "summary": "Sugerir categoría por comercio",
+        "description": "Para cada comercio (hasta 200), la categoría que el usuario más usó para él en los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "deviceToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sugerencias, en el mismo orden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Suggestions"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
     "/periods/current": {
       "get": {
         "tags": [
@@ -3032,6 +3081,48 @@
         ],
         "additionalProperties": false
       },
+      "Suggestions": {
+        "type": "object",
+        "properties": {
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "merchant": {
+                  "type": "string",
+                  "description": "Tal como se envió"
+                },
+                "categoryId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "uses": {
+                  "type": "integer",
+                  "description": "Veces que se usó esa categoría para el comercio en los últimos 12 meses"
+                }
+              },
+              "required": [
+                "merchant",
+                "categoryId",
+                "uses"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "suggestions"
+        ],
+        "additionalProperties": false
+      },
       "ImportResponse": {
         "type": "object",
         "properties": {
@@ -3216,6 +3307,23 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SuggestionsRequest": {
+        "type": "object",
+        "properties": {
+          "merchants": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        },
+        "required": [
+          "merchants"
         ]
       },
       "RegisterRequest": {

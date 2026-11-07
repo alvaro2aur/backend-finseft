@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { importDescription, localDate, toClpAmount } from '../src/lib/importRules.ts';
+import { importDescription, localDate, normalizeMerchant, toClpAmount } from '../src/lib/importRules.ts';
 
 describe('reglas de importación', () => {
   test('montos: CLP tal cual; otras monedas en centésimas a pesos, mínimo 1', () => {
@@ -18,5 +18,9 @@ describe('reglas de importación', () => {
   test('la fecha es la de Chile, no la de UTC', () => {
     expect(localDate('2026-11-03T02:30:00Z', 'America/Santiago')).toBe('2026-11-02'); // 23:30 del día 2 en Chile
     expect(localDate('2026-11-03T12:00:00-03:00', 'America/Santiago')).toBe('2026-11-03');
+  });
+
+  test('normalizar comercios: minúsculas, sin espacios sobrantes', () => {
+    expect(normalizeMerchant('  Lider   EXPRESS ')).toBe('lider express');
   });
 });

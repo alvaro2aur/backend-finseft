@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { config } from '../config.ts';
 import { withTenant, type Db } from '../db.ts';
-import { importDescription, localDate, toClpAmount } from '../lib/importRules.ts';
+import { todayISO } from '../lib/dates.ts';
+import { importDescription, localDate, MERCHANT_SQL, normalizeMerchant, toClpAmount } from '../lib/importRules.ts';
 import { authenticate, type AuthCtx } from '../middleware/auth.ts';
-import { importBody, importItem } from '../schemas.ts';
+import { importBody, importItem, suggestionsBody } from '../schemas.ts';
 
 // Importación de compras capturadas por la app Android (token de dispositivo o sesión de usuario).
 export const importsRouter = Router();
@@ -135,4 +136,36 @@ importsRouter.post('/transactions', async (req, res) => {
   const summary: Record<Status, number> = { created: 0, exists: 0, discarded: 0, rejected: 0, possible_duplicate: 0 };
   for (const r of results) summary[r.status]++;
   res.json({ results, summary });
+});
+
+/**
+ * Sugerencia de categoría por comercio, desde los movimientos propios del usuario (RLS) de los últimos
+ * 12 meses: la categoría más usada para ese comercio; ante empate, la usada más recientemente.
+ */
+importsRouter.post('/suggestions', async (req, res) => {
+  const { merchants } = suggestionsBody.parse(req.body);
+  const keys = merchants.map(normalizeMerchant);
+  const rows = await withTenant(req.auth, async (c) => {
+    const r = await c.query(
+      `WITH hist AS (
+         SELECT ${MERCHANT_SQL} AS merchant, t.category_id, count(*)::int AS uses, max(t.occurred_on) AS last_on
+           FROM transactions t JOIN categories c ON c.id = t.category_id
+          WHERE t.user_id = $2 AND t.deleted_at IS NULL AND c.archived_at IS NULL
+            AND t.occurred_on >= $3::date - interval '12 months'
+          GROUP BY 1, 2
+       )
+       SELECT DISTINCT ON (merchant) merchant, category_id, uses
+         FROM hist WHERE merchant = ANY($1::text[])
+        ORDER BY merchant, uses DESC, last_on DESC`,
+      [keys, req.auth.userId, todayISO()],
+    );
+    return r.rows;
+  });
+  const best = new Map<string, { category_id: string; uses: number }>(rows.map((r) => [r.merchant, r]));
+  res.json({
+    suggestions: merchants.map((merchant, i) => {
+      const hit = best.get(keys[i]!);
+      return { merchant, categoryId: hit?.category_id ?? null, uses: hit?.uses ?? 0 };
+    }),
+  });
 });
