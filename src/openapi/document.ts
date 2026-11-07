@@ -81,13 +81,14 @@ const schemas: Record<string, Json> = {
   }),
   CategoryList: obj({ items: arr(ref('Category')) }),
 
-  Instrument: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }), label: nullable(str()), archived: bool(), createdAt: dateTime(), updatedAt: dateTime() }),
+  Instrument: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }), label: nullable(str()), billingCutDay: nullable(int({ minimum: 1, maximum: 31, description: 'Día de corte de la facturación (solo tarjetas de crédito); null = mes calendario' })), archived: bool(), createdAt: dateTime(), updatedAt: dateTime() }),
   InstrumentList: obj({ items: arr(ref('Instrument')) }),
   InstrumentSummary: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }) }),
 
   Transaction: obj({
     id: uuid(),
     date: date(),
+    budgetMonth: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: 'Mes al que se imputa: el calendario de `date`, o el período de facturación si la tarjeta tiene día de corte' }),
     type: txnType,
     amount: int({ minimum: 1, description: 'Siempre positivo; el signo lo da `type`' }),
     currency: str(),
@@ -147,6 +148,7 @@ const schemas: Record<string, Json> = {
   }),
   VsPrevious: vsPrevious,
   Health: obj({ status: oneOfEnum('ok') }),
+  CurrentPeriod: obj({ month: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }) }),
 };
 
 // Cuerpos de request: derivados de zod. `io: 'input'` describe lo que se envía (los defaults quedan opcionales).
@@ -211,7 +213,7 @@ const responses: Record<string, Json> = Object.fromEntries(
 const jsonOf = (schema: Json): Json => ({ 'application/json': { schema } });
 const idParam: Json = { name: 'id', in: 'path', required: true, schema: uuid() };
 const query = (name: string, schema: Json, description: string): Json => ({ name, in: 'query', required: false, schema, description });
-const monthParam = query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes `YYYY-MM`; por defecto el mes actual (zona horaria de la app)');
+const monthParam = query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes de presupuesto `YYYY-MM` (en tarjetas con día de corte, su período de facturación); por defecto el mes calendario actual. Ver `GET /periods/current`');
 const includeArchived = query('includeArchived', oneOfEnum('true', 'false', '1', '0'), 'Incluir archivados (por defecto no)');
 
 interface Op {
@@ -343,10 +345,10 @@ const paths: Record<string, Json> = {
   // --- Instrumentos ---
   '/instruments': {
     get: op({ tag: 'Instrumentos', id: 'listInstruments', summary: 'Instrumentos propios', description: 'Son privados de cada usuario.', params: [includeArchived], ok: [200, 'Instrumentos', ref('InstrumentList')], errors: ['BadRequest'] }),
-    post: op({ tag: 'Instrumentos', id: 'createInstrument', summary: 'Crear instrumento', description: 'Nunca se guarda el número completo, solo los últimos 4 dígitos.', body: 'CreateInstrumentRequest', ok: [201, 'Instrumento creado', ref('Instrument')], errors: ['Conflict'] }),
+    post: op({ tag: 'Instrumentos', id: 'createInstrument', summary: 'Crear instrumento', description: 'Nunca se guarda el número completo, solo los últimos 4 dígitos. `billingCutDay` (solo tarjetas de crédito) imputa cada compra al período de facturación: hasta el día de corte, ese mes; desde el día siguiente, el mes siguiente.', body: 'CreateInstrumentRequest', ok: [201, 'Instrumento creado', ref('Instrument')], errors: ['Conflict'] }),
   },
   '/instruments/{id}': {
-    patch: op({ tag: 'Instrumentos', id: 'updateInstrument', summary: 'Editar, archivar o restaurar un instrumento', params: [idParam], body: 'UpdateInstrumentRequest', ok: [200, 'Instrumento actualizado', ref('Instrument')], errors: ['NotFound', 'Conflict'] }),
+    patch: op({ tag: 'Instrumentos', id: 'updateInstrument', summary: 'Editar, archivar o restaurar un instrumento', description: 'Cambiar `billingCutDay` reimputa todos los movimientos de la tarjeta. Si deja de ser tarjeta de crédito, pierde el día de corte.', params: [idParam], body: 'UpdateInstrumentRequest', ok: [200, 'Instrumento actualizado', ref('Instrument')], errors: ['NotFound', 'Conflict'] }),
     delete: op({ tag: 'Instrumentos', id: 'archiveInstrument', summary: 'Archivar un instrumento', description: 'No borra: los movimientos conservan su instrumento.', params: [idParam], ok: noContent('Instrumento archivado'), errors: ['NotFound'] }),
   },
 
@@ -358,7 +360,7 @@ const paths: Record<string, Json> = {
       summary: 'Movimientos propios, filtrados, ordenados y paginados',
       description: 'Son privados de cada usuario. Los totales (`totals`) corresponden a todo el conjunto filtrado, no solo a la página. Sin filtros de fecha devuelve todos los períodos.',
       params: [
-        query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes `YYYY-MM`'),
+        query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes de presupuesto `YYYY-MM`: en tarjetas con día de corte es su período de facturación, no la fecha de calendario'),
         query('from', date(), 'Desde (incluido)'),
         query('to', date(), 'Hasta (incluido)'),
         query('categoryId', { anyOf: [uuid(), { const: 'none' }] }, 'Id de categoría, o `none` para movimientos sin categoría'),
@@ -383,6 +385,15 @@ const paths: Record<string, Json> = {
   },
 
   // --- Resúmenes ---
+  '/periods/current': {
+    get: op({
+      tag: 'Resúmenes',
+      id: 'getCurrentPeriod',
+      summary: 'Mes de presupuesto en curso',
+      description: 'El mayor entre el mes calendario de hoy y el período actual de cada tarjeta con día de corte (p. ej. el 28 de octubre, con corte el 26, es noviembre). Úsalo como mes por defecto en resúmenes y movimientos.',
+      ok: [200, 'Mes en curso', ref('CurrentPeriod')],
+    }),
+  },
   '/summary/personal': {
     get: op({
       tag: 'Resúmenes',

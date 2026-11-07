@@ -49,9 +49,21 @@ export const patchCategoryBody = z
 const bank = z.string().trim().min(1).max(100);
 const last4 = z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos');
 const label = z.string().trim().min(1).max(100);
-export const createInstrumentBody = z.object({ type: instrumentType, bank, last4, label: label.nullable().optional() });
+// Día de corte de la facturación: solo para tarjetas de crédito. null = mes calendario.
+const billingCutDay = z.number().int().min(1).max(31).nullable();
+export const CUT_DAY_ONLY_CREDIT = 'El día de corte solo aplica a tarjetas de crédito';
+export const createInstrumentBody = z
+  .object({ type: instrumentType, bank, last4, label: label.nullable().optional(), billingCutDay: billingCutDay.optional() })
+  .refine((b) => b.billingCutDay == null || b.type === 'tarjeta_credito', { message: CUT_DAY_ONLY_CREDIT, path: ['billingCutDay'] });
 export const patchInstrumentBody = z
-  .object({ type: instrumentType.optional(), bank: bank.optional(), last4: last4.optional(), label: label.nullable().optional(), archived: z.boolean().optional() })
+  .object({
+    type: instrumentType.optional(),
+    bank: bank.optional(),
+    last4: last4.optional(),
+    label: label.nullable().optional(),
+    billingCutDay: billingCutDay.optional(),
+    archived: z.boolean().optional(),
+  })
   .strict();
 
 // --- Movimientos ---

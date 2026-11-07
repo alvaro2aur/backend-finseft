@@ -23,6 +23,19 @@ bun test          # pruebas de integración contra la base fintseft_test (se rec
 bun run typecheck
 ```
 
+### Migraciones
+
+`init-schema.sql` crea siempre el esquema completo. Las bases creadas con una versión anterior se actualizan con
+los archivos de `migrations/`, en orden y como superusuario:
+
+```bash
+psql -h localhost -U <superusuario> -d fintseft -f migrations/001_billing_cut_day.sql
+```
+
+| Migración | Qué agrega |
+|---|---|
+| `001_billing_cut_day.sql` | Día de corte en tarjetas de crédito y mes de presupuesto (`budget_month`) en movimientos |
+
 ## Cómo funciona el aislamiento
 
 Cada request autenticada abre una transacción y fija `app.household_id` y `app.user_id` (`src/db.ts → withTenant`);
@@ -42,6 +55,20 @@ en cada request, así cambiar de grupo no deja tokens desactualizados.
 - Valores de enums en minúscula: `kind`: `fija|variable`; `type` de movimiento: `ingreso|egreso`;
   `type` de instrumento: `cuenta_corriente|tarjeta_debito|tarjeta_credito`; `scope`: `personal|shared`.
 - Autorización: `Authorization: Bearer <accessToken>` (15 min). Renovar con `/auth/refresh` (rota el token).
+
+## Períodos de facturación
+
+Cada movimiento tiene un **mes de presupuesto** (`budgetMonth`). Por defecto es el mes calendario de su fecha; si se pagó
+con una tarjeta de crédito que tiene **día de corte**, es su período de facturación: hasta el día de corte (incluido)
+cuenta en ese mes y desde el día siguiente, en el siguiente (corte 26: una compra del 27 de octubre es de noviembre).
+Si el mes no tiene ese día (corte 31 en febrero) se usa su último día.
+
+- Lo calcula la base (`period_month`) con triggers: al crear o editar un movimiento, y al cambiar el corte de una
+  tarjeta (se reimputan todos sus movimientos).
+- El filtro `month` de `/transactions` y los resúmenes usan el mes de presupuesto; `from`/`to` siguen siendo fechas.
+- `GET /periods/current` da el mes en curso considerando los cortes; los clientes lo usan como mes por defecto.
+- Limitación: los días transcurridos y el "por día" del resumen usan el mes calendario, porque con cortes distintos por
+  tarjeta no hay un único ciclo. Los ingresos en cuenta corriente siguen por mes calendario.
 
 ## Contrato OpenAPI
 
