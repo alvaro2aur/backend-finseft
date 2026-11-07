@@ -35,6 +35,7 @@ psql -h localhost -U <superusuario> -d fintseft -f migrations/001_billing_cut_da
 | Migración | Qué agrega |
 |---|---|
 | `001_billing_cut_day.sql` | Día de corte en tarjetas de crédito y mes de presupuesto (`budget_month`) en movimientos |
+| `002_device_tokens.sql` | Tokens de dispositivo (importación desde la app) e índice para detectar posibles duplicados |
 
 ## Cómo funciona el aislamiento
 

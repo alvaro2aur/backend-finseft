@@ -127,6 +127,23 @@ CREATE TABLE password_reset_tokens (
 );
 CREATE INDEX password_reset_tokens_user ON password_reset_tokens (user_id);
 
+-- Tokens de dispositivo (app Android): se crean desde la web, se guarda solo el hash.
+-- Sin RLS: se consultan para autenticar, antes de conocer el grupo (igual que refresh_tokens).
+CREATE TABLE device_tokens (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id uuid NOT NULL,
+  user_id      uuid NOT NULL,
+  name         text NOT NULL,
+  token_hash   text NOT NULL UNIQUE,
+  token_prefix text NOT NULL,                  -- primeros caracteres, para reconocerlo en la lista
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz,
+  revoked_at   timestamptz,
+  FOREIGN KEY (user_id, household_id) REFERENCES users (id, household_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+CREATE INDEX device_tokens_user ON device_tokens (user_id);
+
 -- Categorías (pantalla Categorías), con su presupuesto (valor actual). Dos alcances:
 --   compartida: user_id IS NULL     -> la ven y usan todos los miembros del grupo
 --   personal:   user_id = <usuario> -> solo su dueño
@@ -213,6 +230,8 @@ CREATE INDEX txn_user_date       ON transactions (user_id, occurred_on DESC) WHE
 CREATE INDEX txn_user_cat_date   ON transactions (user_id, category_id, occurred_on) WHERE deleted_at IS NULL;
 CREATE INDEX txn_user_instr_date ON transactions (user_id, instrument_id, occurred_on) WHERE deleted_at IS NULL;
 CREATE INDEX txn_user_budget_month ON transactions (user_id, budget_month, occurred_on DESC) WHERE deleted_at IS NULL;
+-- Detección de posibles duplicados al importar (mismo instrumento y monto, fecha ± 1 día)
+CREATE INDEX txn_user_instr_amount_date ON transactions (user_id, instrument_id, amount, occurred_on) WHERE deleted_at IS NULL;
 
 CREATE FUNCTION set_budget_month() RETURNS trigger
 LANGUAGE plpgsql AS $$
