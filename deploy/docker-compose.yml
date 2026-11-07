@@ -1,0 +1,109 @@
+# Despliegue de FinSelf en un solo equipo (probado en Orange Pi 3B, arm64).
+# Estructura esperada en el servidor:
+#   finself/                 ← esta carpeta (compose, Caddyfile, initdb, .env)
+#   finself/backend/         ← código de backend-finseft (se construye aquí)
+#   finself/web/             ← build del front (web-finseft: `VITE_API_URL=/api bun run build`, carpeta dist)
+name: finself
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASS}
+      POSTGRES_DB: fintseft
+      APP_DB_PASS: ${APP_DB_PASS} # lo usa initdb/02-app-login.sh
+    volumes:
+      - db-data:/var/lib/postgresql
+      # Solo corren la primera vez, con la base vacía
+      - ./backend/init-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./initdb/02-app-login.sh:/docker-entrypoint-initdb.d/02-app-login.sh:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d fintseft']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      POSTGRES_DB: fintseft
+      POSTGRES_SCHEMA: common
+      APP_DB_USER: finseft_app # sin BYPASSRLS: nunca el superusuario
+      APP_DB_PASS: ${APP_DB_PASS}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3000
+      CORS_ORIGIN: ${PUBLIC_URLS}
+      APP_URL: ${APP_URL}
+      APP_TIMEZONE: ${APP_TIMEZONE:-America/Santiago}
+      TRUST_PROXY: loopback, uniquelocal # Caddy está en la red interna de Docker
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+
+  web:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '${HTTP_PORT:-8090}:80'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # Exposición a internet con Tailscale Funnel (HTTPS en https://<TS_HOSTNAME>.<tu-tailnet>.ts.net).
+  # Se activa aparte:  docker compose --profile funnel up -d   (requiere TS_AUTHKEY en .env)
+  tunnel:
+    image: tailscale/tailscale:stable
+    profiles: ['funnel']
+    restart: unless-stopped
+    depends_on:
+      - web
+    hostname: ${TS_HOSTNAME:-finself}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-finself}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: 'true' # sin privilegios ni /dev/net/tun
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./tailscale-serve.json:/config/serve.json:ro
+
+  # Respaldo diario de la base en ./backups (se guardan los últimos 14). Cópialos también fuera del equipo.
+  backup:
+    image: postgres:18
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASS}
+      PGDATABASE: fintseft
+    volumes:
+      - ./backups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          f=/backups/fintseft-$$(date +%Y%m%d-%H%M).dump
+          pg_dump -Fc -f "$$f.tmp" && mv "$$f.tmp" "$$f" && echo "respaldo: $$f"
+          ls -1t /backups/*.dump 2>/dev/null | tail -n +15 | xargs -r rm -f
+          sleep 86400
+        done
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+  tailscale-state:

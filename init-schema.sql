@@ -39,6 +39,19 @@ LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('app.household_id', true
 CREATE FUNCTION current_app_user() RETURNS uuid
 LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('app.user_id', true), '')::uuid $$;
 
+-- Mes de presupuesto de una fecha según el día de corte de la tarjeta (primer día del mes).
+-- Sin corte: el mes calendario. Con corte C: hasta el día C (incluido) es ese mes; desde C+1, el siguiente.
+-- Si el mes no tiene día C (p. ej. corte 31 en febrero) se usa su último día.
+CREATE FUNCTION period_month(d date, cut smallint) RETURNS date
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE
+    WHEN cut IS NOT NULL
+     AND extract(day FROM d) > least(cut, extract(day FROM date_trunc('month', d::timestamp) + interval '1 month - 1 day'))
+    THEN (date_trunc('month', d::timestamp) + interval '1 month')::date
+    ELSE date_trunc('month', d::timestamp)::date
+  END
+$$;
+
 -- Grupos familiares (unidad de aislamiento). Todo usuario pertenece a exactamente uno:
 -- al registrarse se crea su grupo y queda como owner; luego puede aceptar una invitación.
 CREATE TABLE households (
@@ -114,6 +127,23 @@ CREATE TABLE password_reset_tokens (
 );
 CREATE INDEX password_reset_tokens_user ON password_reset_tokens (user_id);
 
+-- Tokens de dispositivo (app Android): se crean desde la web, se guarda solo el hash.
+-- Sin RLS: se consultan para autenticar, antes de conocer el grupo (igual que refresh_tokens).
+CREATE TABLE device_tokens (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  household_id uuid NOT NULL,
+  user_id      uuid NOT NULL,
+  name         text NOT NULL,
+  token_hash   text NOT NULL UNIQUE,
+  token_prefix text NOT NULL,                  -- primeros caracteres, para reconocerlo en la lista
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  last_used_at timestamptz,
+  revoked_at   timestamptz,
+  FOREIGN KEY (user_id, household_id) REFERENCES users (id, household_id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+CREATE INDEX device_tokens_user ON device_tokens (user_id);
+
 -- Categorías (pantalla Categorías), con su presupuesto (valor actual). Dos alcances:
 --   compartida: user_id IS NULL     -> la ven y usan todos los miembros del grupo
 --   personal:   user_id = <usuario> -> solo su dueño
@@ -149,9 +179,12 @@ CREATE TABLE instruments (
   bank         text NOT NULL,
   last4        char(4) NOT NULL CHECK (last4 ~ '^[0-9]{4}$'),   -- nunca el número completo
   label        text,                                             -- alias opcional del usuario
+  -- día de corte de la facturación (solo tarjetas de crédito); NULL = mes calendario
+  billing_cut_day smallint CHECK (billing_cut_day BETWEEN 1 AND 31),
   archived_at  timestamptz,
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now(),
+  CHECK (billing_cut_day IS NULL OR type = 'tarjeta_credito'),
   UNIQUE (id, user_id),     -- destino de la FK compuesta desde transactions
   -- si el usuario cambia de grupo, sus instrumentos lo siguen
   FOREIGN KEY (user_id, household_id) REFERENCES users (id, household_id)
@@ -168,6 +201,9 @@ CREATE TABLE transactions (
   household_id  uuid NOT NULL,
   user_id       uuid NOT NULL,
   occurred_on   date NOT NULL,
+  -- mes al que se imputa (primer día del mes): calendario, o el período de facturación de la tarjeta.
+  -- Lo mantienen los triggers transactions_set_budget_month e instruments_recompute_budget_month.
+  budget_month  date NOT NULL CHECK (extract(day FROM budget_month) = 1),
   type          txn_type NOT NULL,
   amount        bigint NOT NULL CHECK (amount > 0),   -- siempre positivo; el signo lo da type
   currency      char(3) NOT NULL DEFAULT 'CLP',       -- multi-moneda a futuro
@@ -193,6 +229,34 @@ CREATE TABLE transactions (
 CREATE INDEX txn_user_date       ON transactions (user_id, occurred_on DESC) WHERE deleted_at IS NULL;
 CREATE INDEX txn_user_cat_date   ON transactions (user_id, category_id, occurred_on) WHERE deleted_at IS NULL;
 CREATE INDEX txn_user_instr_date ON transactions (user_id, instrument_id, occurred_on) WHERE deleted_at IS NULL;
+CREATE INDEX txn_user_budget_month ON transactions (user_id, budget_month, occurred_on DESC) WHERE deleted_at IS NULL;
+-- Detección de posibles duplicados al importar (mismo instrumento y monto, fecha ± 1 día)
+CREATE INDEX txn_user_instr_amount_date ON transactions (user_id, instrument_id, amount, occurred_on) WHERE deleted_at IS NULL;
+
+CREATE FUNCTION set_budget_month() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  -- Si el instrumento no existe o no es visible queda NULL (mes calendario) y la FK rechaza la fila.
+  NEW.budget_month = period_month(NEW.occurred_on, (SELECT billing_cut_day FROM instruments WHERE id = NEW.instrument_id));
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER transactions_set_budget_month
+  BEFORE INSERT OR UPDATE OF occurred_on, instrument_id ON transactions
+  FOR EACH ROW EXECUTE FUNCTION set_budget_month();
+
+-- Si cambia el día de corte de una tarjeta, se reimputan sus movimientos.
+CREATE FUNCTION recompute_budget_month() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE transactions SET budget_month = period_month(occurred_on, NEW.billing_cut_day) WHERE instrument_id = NEW.id;
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER instruments_recompute_budget_month
+  AFTER UPDATE OF billing_cut_day ON instruments
+  FOR EACH ROW WHEN (OLD.billing_cut_day IS DISTINCT FROM NEW.billing_cut_day)
+  EXECUTE FUNCTION recompute_budget_month();
 CREATE TRIGGER transactions_set_updated_at
   BEFORE UPDATE ON transactions FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
@@ -219,7 +283,8 @@ CREATE TRIGGER transactions_check_category
 -- Gasto agregado de las categorías compartidas del grupo, sumando a todos los miembros.
 -- Los movimientos son privados, así que esto corre como un rol propio (finseft_stats, con
 -- BYPASSRLS y solo SELECT en transactions y categories) y devuelve únicamente totales.
--- El grupo sale del contexto de la request (app.household_id). p_to es exclusivo.
+-- El grupo sale del contexto de la request (app.household_id). Filtra por mes de presupuesto
+-- (budget_month): p_from es el primer día del primer mes y p_to, el primer día del mes siguiente (exclusivo).
 -- El gasto de las categorías personales lo calcula la API con consultas normales (RLS).
 CREATE FUNCTION group_category_spend(p_from date, p_to date)
 RETURNS TABLE (category_id uuid, currency char(3), group_spent bigint, my_spent bigint)
@@ -234,7 +299,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = common, public AS $$
     AND c.user_id IS NULL
     AND t.type = 'egreso'
     AND t.deleted_at IS NULL
-    AND t.occurred_on >= p_from AND t.occurred_on < p_to
+    AND t.budget_month >= p_from AND t.budget_month < p_to
   GROUP BY t.category_id, t.currency
 $$;
 

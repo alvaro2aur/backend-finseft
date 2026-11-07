@@ -52,7 +52,7 @@ const query = z.object({ month: monthStr.optional() });
 async function ownSpendByCategory(c: Db, from: string, to: string, currency: string) {
   const { rows } = await c.query(
     `SELECT category_id, sum(amount)::bigint AS spent FROM transactions
-      WHERE type = 'egreso' AND deleted_at IS NULL AND currency = $3 AND occurred_on >= $1 AND occurred_on < $2
+      WHERE type = 'egreso' AND deleted_at IS NULL AND currency = $3 AND budget_month >= $1 AND budget_month < $2
       GROUP BY category_id`,
     [from, to, currency],
   );
@@ -70,7 +70,7 @@ summaryRouter.get('/personal', async (req, res) => {
     const income = (
       await c.query(
         `SELECT COALESCE(sum(amount), 0)::bigint AS v FROM transactions
-          WHERE type = 'ingreso' AND deleted_at IS NULL AND currency = $3 AND occurred_on >= $1 AND occurred_on < $2`,
+          WHERE type = 'ingreso' AND deleted_at IS NULL AND currency = $3 AND budget_month >= $1 AND budget_month < $2`,
         [m.from, m.to, cur],
       )
     ).rows[0].v as number;

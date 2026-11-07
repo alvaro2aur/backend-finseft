@@ -2,9 +2,12 @@ import type { Router } from 'express';
 import { openapiRouter } from '../openapi/index.ts';
 import { authRouter, meRouter } from './auth.ts';
 import { categoriesRouter } from './categories.ts';
+import { devicesRouter } from './devices.ts';
 import { healthRouter } from './health.ts';
 import { householdRouter } from './household.ts';
+import { importsRouter } from './imports.ts';
 import { instrumentsRouter } from './instruments.ts';
+import { periodsRouter } from './periods.ts';
 import { summaryRouter } from './summary.ts';
 import { transactionsRouter } from './transactions.ts';
 
@@ -22,4 +25,7 @@ export const mounts: [prefix: string, router: Router][] = [
   ['/instruments', instrumentsRouter],
   ['/transactions', transactionsRouter],
   ['/summary', summaryRouter],
+  ['/periods', periodsRouter],
+  ['/devices', devicesRouter],
+  ['/imports', importsRouter],
 ];

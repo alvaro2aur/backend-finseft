@@ -16,6 +16,9 @@ const money = z.number().int().max(1_000_000_000_000);
 const name = z.string().trim().min(1).max(100);
 const currency = z.string().length(3).toUpperCase();
 
+// --- Dispositivos (tokens para la app) ---
+export const createDeviceBody = z.object({ name: z.string().trim().min(1).max(60) });
+
 // --- Autenticación ---
 export const registerBody = z.object({ email, password, displayName: z.string().trim().min(1).max(100).optional() });
 export const loginBody = z.object({ email, password: z.string().min(1).max(200) });
@@ -49,9 +52,21 @@ export const patchCategoryBody = z
 const bank = z.string().trim().min(1).max(100);
 const last4 = z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos');
 const label = z.string().trim().min(1).max(100);
-export const createInstrumentBody = z.object({ type: instrumentType, bank, last4, label: label.nullable().optional() });
+// Día de corte de la facturación: solo para tarjetas de crédito. null = mes calendario.
+const billingCutDay = z.number().int().min(1).max(31).nullable();
+export const CUT_DAY_ONLY_CREDIT = 'El día de corte solo aplica a tarjetas de crédito';
+export const createInstrumentBody = z
+  .object({ type: instrumentType, bank, last4, label: label.nullable().optional(), billingCutDay: billingCutDay.optional() })
+  .refine((b) => b.billingCutDay == null || b.type === 'tarjeta_credito', { message: CUT_DAY_ONLY_CREDIT, path: ['billingCutDay'] });
 export const patchInstrumentBody = z
-  .object({ type: instrumentType.optional(), bank: bank.optional(), last4: last4.optional(), label: label.nullable().optional(), archived: z.boolean().optional() })
+  .object({
+    type: instrumentType.optional(),
+    bank: bank.optional(),
+    last4: last4.optional(),
+    label: label.nullable().optional(),
+    billingCutDay: billingCutDay.optional(),
+    archived: z.boolean().optional(),
+  })
   .strict();
 
 // --- Movimientos ---
@@ -65,3 +80,23 @@ export const createTransactionBody = z.object({
   currency: currency.optional(),
 });
 export const patchTransactionBody = createTransactionBody.partial().strict();
+
+// --- Importación desde la app ---
+// Postgres no acepta el carácter NUL en texto: se rechaza al validar, no al insertar.
+const noNul = (v: string) => !v.includes('\u0000');
+/** Una compra capturada por la app. Se valida por separado para que una inválida no rompa el lote. */
+export const importItem = z.object({
+  externalId: z.string().trim().min(1).max(200).refine(noNul, 'Contiene un carácter no permitido'),
+  purchasedAt: z.iso.datetime({ offset: true }),
+  amountMinor: z.number().int().min(1).max(1_000_000_000_000),
+  currency: z.string().regex(/^[A-Z]{3}$/, 'Código ISO 4217 de 3 letras'),
+  merchant: z.string().max(200).refine(noNul, 'Contiene un carácter no permitido').nullable().optional(),
+  cardLast4: z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos'),
+  categoryId: uuid,
+  confirmDuplicate: z.boolean().optional().describe('true = registrarla aunque se parezca a un movimiento digitado a mano'),
+});
+export const IMPORT_MAX_ITEMS = 200;
+export const importBody = z.object({ items: z.array(z.unknown()).min(1).max(IMPORT_MAX_ITEMS) });
+export const suggestionsBody = z.object({ merchants: z.array(z.string().max(200)).min(1).max(IMPORT_MAX_ITEMS) });
+/** Solo para documentar el cuerpo en el OpenAPI (la validación real es por elemento). */
+export const importBodyDoc = z.object({ items: z.array(importItem).min(1).max(IMPORT_MAX_ITEMS) });

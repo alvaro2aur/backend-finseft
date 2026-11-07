@@ -81,13 +81,14 @@ const schemas: Record<string, Json> = {
   }),
   CategoryList: obj({ items: arr(ref('Category')) }),
 
-  Instrument: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }), label: nullable(str()), archived: bool(), createdAt: dateTime(), updatedAt: dateTime() }),
+  Instrument: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }), label: nullable(str()), billingCutDay: nullable(int({ minimum: 1, maximum: 31, description: 'Día de corte de la facturación (solo tarjetas de crédito); null = mes calendario' })), archived: bool(), createdAt: dateTime(), updatedAt: dateTime() }),
   InstrumentList: obj({ items: arr(ref('Instrument')) }),
   InstrumentSummary: obj({ id: uuid(), type: instrumentType, bank: str(), last4: str({ pattern: '^\\d{4}$' }) }),
 
   Transaction: obj({
     id: uuid(),
     date: date(),
+    budgetMonth: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: 'Mes al que se imputa: el calendario de `date`, o el período de facturación si la tarjeta tiene día de corte' }),
     type: txnType,
     amount: int({ minimum: 1, description: 'Siempre positivo; el signo lo da `type`' }),
     currency: str(),
@@ -147,10 +148,34 @@ const schemas: Record<string, Json> = {
   }),
   VsPrevious: vsPrevious,
   Health: obj({ status: oneOfEnum('ok') }),
+  Device: obj({ id: uuid(), name: str(), prefix: str({ description: 'Primeros caracteres del token, para reconocerlo' }), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool() }),
+  DeviceList: obj({ items: arr(ref('Device')) }),
+  ImportResult: obj(
+    {
+      index: int({ description: 'Posición de la compra en el lote' }),
+      externalId: str(),
+      status: oneOfEnum('created', 'exists', 'discarded', 'rejected', 'possible_duplicate'),
+      transactionId: uuid(),
+      budgetMonth: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }),
+      error: obj({ code: oneOfEnum('invalid_item', 'unknown_card', 'ambiguous_card', 'invalid_category'), message: str(), details: {} }, ['code', 'message']),
+      matches: arr(obj({ transactionId: uuid(), date: date(), amount: int(), description: str(), categoryName: nullable(str()) })),
+    },
+    ['index', 'status'],
+  ),
+  Suggestions: obj({ suggestions: arr(obj({ merchant: str({ description: 'Tal como se envió' }), categoryId: nullable(uuid()), uses: int({ description: 'Veces que se usó esa categoría para el comercio en los últimos 12 meses' }) })) }),
+  ImportResponse: obj({
+    results: arr(ref('ImportResult')),
+    summary: obj({ created: int(), exists: int(), discarded: int(), rejected: int(), possible_duplicate: int() }),
+  }),
+  CreatedDevice: obj({ id: uuid(), name: str(), prefix: str(), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool(), token: str({ description: 'Se muestra solo en esta respuesta; guárdalo en la app' }) }),
+  CurrentPeriod: obj({ month: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }) }),
 };
 
 // Cuerpos de request: derivados de zod. `io: 'input'` describe lo que se envía (los defaults quedan opcionales).
 const bodies = {
+  CreateDeviceRequest: S.createDeviceBody,
+  ImportTransactionsRequest: S.importBodyDoc,
+  SuggestionsRequest: S.suggestionsBody,
   RegisterRequest: S.registerBody,
   LoginRequest: S.loginBody,
   GoogleLoginRequest: S.googleBody,
@@ -211,7 +236,7 @@ const responses: Record<string, Json> = Object.fromEntries(
 const jsonOf = (schema: Json): Json => ({ 'application/json': { schema } });
 const idParam: Json = { name: 'id', in: 'path', required: true, schema: uuid() };
 const query = (name: string, schema: Json, description: string): Json => ({ name, in: 'query', required: false, schema, description });
-const monthParam = query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes `YYYY-MM`; por defecto el mes actual (zona horaria de la app)');
+const monthParam = query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes de presupuesto `YYYY-MM` (en tarjetas con día de corte, su período de facturación); por defecto el mes calendario actual. Ver `GET /periods/current`');
 const includeArchived = query('includeArchived', oneOfEnum('true', 'false', '1', '0'), 'Incluir archivados (por defecto no)');
 
 interface Op {
@@ -225,11 +250,14 @@ interface Op {
   ok: [number, string, Json | null]; // [status, descripción, esquema o null (sin cuerpo)]
   errors?: ErrorName[];
   extra?: Record<number, Json>; // respuestas adicionales que no son de la lista común
+  device?: boolean; // también acepta token de dispositivo (app)
 }
 
 function op(o: Op): Json {
   const errors: ErrorName[] = [...(o.errors ?? [])];
   if (o.auth !== false && !errors.includes('Unauthorized')) errors.push('Unauthorized');
+  // Un token de dispositivo puede llegar a cualquier operación protegida y recibir 403.
+  if (o.auth !== false && !errors.includes('Forbidden')) errors.push('Forbidden');
   if (o.body && !errors.includes('BadRequest')) errors.unshift('BadRequest');
   const [status, description, schema] = o.ok;
   return {
@@ -237,7 +265,7 @@ function op(o: Op): Json {
     operationId: o.id,
     summary: o.summary,
     ...(o.description ? { description: o.description } : {}),
-    security: o.auth === false ? [] : [{ bearerAuth: [] }],
+    security: o.auth === false ? [] : o.device ? [{ bearerAuth: [] }, { deviceToken: [] }] : [{ bearerAuth: [] }],
     ...(o.params?.length ? { parameters: o.params } : {}),
     ...(o.body ? { requestBody: { required: true, content: jsonOf(ref(o.body)) } } : {}),
     responses: {
@@ -330,6 +358,7 @@ const paths: Record<string, Json> = {
       summary: 'Categorías visibles',
       description: 'Las compartidas del grupo y las personales del usuario.',
       params: [includeArchived, query('scope', scope, 'Filtra por alcance')],
+      device: true,
       ok: [200, 'Categorías', ref('CategoryList')],
       errors: ['BadRequest'],
     }),
@@ -342,11 +371,11 @@ const paths: Record<string, Json> = {
 
   // --- Instrumentos ---
   '/instruments': {
-    get: op({ tag: 'Instrumentos', id: 'listInstruments', summary: 'Instrumentos propios', description: 'Son privados de cada usuario.', params: [includeArchived], ok: [200, 'Instrumentos', ref('InstrumentList')], errors: ['BadRequest'] }),
-    post: op({ tag: 'Instrumentos', id: 'createInstrument', summary: 'Crear instrumento', description: 'Nunca se guarda el número completo, solo los últimos 4 dígitos.', body: 'CreateInstrumentRequest', ok: [201, 'Instrumento creado', ref('Instrument')], errors: ['Conflict'] }),
+    get: op({ tag: 'Instrumentos', id: 'listInstruments', summary: 'Instrumentos propios', description: 'Son privados de cada usuario.', params: [includeArchived], ok: [200, 'Instrumentos', ref('InstrumentList')], errors: ['BadRequest'], device: true }),
+    post: op({ tag: 'Instrumentos', id: 'createInstrument', summary: 'Crear instrumento', description: 'Nunca se guarda el número completo, solo los últimos 4 dígitos. `billingCutDay` (solo tarjetas de crédito) imputa cada compra al período de facturación: hasta el día de corte, ese mes; desde el día siguiente, el mes siguiente.', body: 'CreateInstrumentRequest', ok: [201, 'Instrumento creado', ref('Instrument')], errors: ['Conflict'] }),
   },
   '/instruments/{id}': {
-    patch: op({ tag: 'Instrumentos', id: 'updateInstrument', summary: 'Editar, archivar o restaurar un instrumento', params: [idParam], body: 'UpdateInstrumentRequest', ok: [200, 'Instrumento actualizado', ref('Instrument')], errors: ['NotFound', 'Conflict'] }),
+    patch: op({ tag: 'Instrumentos', id: 'updateInstrument', summary: 'Editar, archivar o restaurar un instrumento', description: 'Cambiar `billingCutDay` reimputa todos los movimientos de la tarjeta. Si deja de ser tarjeta de crédito, pierde el día de corte.', params: [idParam], body: 'UpdateInstrumentRequest', ok: [200, 'Instrumento actualizado', ref('Instrument')], errors: ['NotFound', 'Conflict'] }),
     delete: op({ tag: 'Instrumentos', id: 'archiveInstrument', summary: 'Archivar un instrumento', description: 'No borra: los movimientos conservan su instrumento.', params: [idParam], ok: noContent('Instrumento archivado'), errors: ['NotFound'] }),
   },
 
@@ -358,7 +387,7 @@ const paths: Record<string, Json> = {
       summary: 'Movimientos propios, filtrados, ordenados y paginados',
       description: 'Son privados de cada usuario. Los totales (`totals`) corresponden a todo el conjunto filtrado, no solo a la página. Sin filtros de fecha devuelve todos los períodos.',
       params: [
-        query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes `YYYY-MM`'),
+        query('month', str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }), 'Mes de presupuesto `YYYY-MM`: en tarjetas con día de corte es su período de facturación, no la fecha de calendario'),
         query('from', date(), 'Desde (incluido)'),
         query('to', date(), 'Hasta (incluido)'),
         query('categoryId', { anyOf: [uuid(), { const: 'none' }] }, 'Id de categoría, o `none` para movimientos sin categoría'),
@@ -382,7 +411,52 @@ const paths: Record<string, Json> = {
     delete: op({ tag: 'Movimientos', id: 'deleteTransaction', summary: 'Eliminar un movimiento', description: 'Borrado lógico.', params: [idParam], ok: noContent('Movimiento eliminado'), errors: ['NotFound'] }),
   },
 
+  // --- Dispositivos ---
+  '/devices': {
+    get: op({ tag: 'Dispositivos', id: 'listDevices', summary: 'Tokens de dispositivo del usuario', description: 'Nunca incluye el token, solo su prefijo.', ok: [200, 'Dispositivos', ref('DeviceList')] }),
+    post: op({ tag: 'Dispositivos', id: 'createDevice', summary: 'Crear un token de dispositivo', description: 'El token (`fsd_…`) se muestra solo en esta respuesta. Requiere sesión de usuario.', body: 'CreateDeviceRequest', ok: [201, 'Dispositivo creado', ref('CreatedDevice')] }),
+  },
+  '/devices/{id}': {
+    delete: op({ tag: 'Dispositivos', id: 'revokeDevice', summary: 'Revocar un token de dispositivo', description: 'Deja de funcionar de inmediato. No borra el registro.', params: [idParam], ok: noContent('Dispositivo revocado'), errors: ['NotFound'] }),
+  },
+
+  // --- Importación desde la app ---
+  '/imports/transactions': {
+    post: op({
+      tag: 'Importación',
+      id: 'importTransactions',
+      summary: 'Importar compras capturadas por la app',
+      description:
+        'Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un movimiento digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan "no reenviar". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.',
+      body: 'ImportTransactionsRequest',
+      ok: [200, 'Resultado por compra', ref('ImportResponse')],
+      device: true,
+    }),
+  },
+
+  '/imports/suggestions': {
+    post: op({
+      tag: 'Importación',
+      id: 'suggestCategories',
+      summary: 'Sugerir categoría por comercio',
+      description:
+        'Para cada comercio (hasta 200), la categoría que el usuario más usó para él en los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.',
+      body: 'SuggestionsRequest',
+      ok: [200, 'Sugerencias, en el mismo orden', ref('Suggestions')],
+      device: true,
+    }),
+  },
+
   // --- Resúmenes ---
+  '/periods/current': {
+    get: op({
+      tag: 'Resúmenes',
+      id: 'getCurrentPeriod',
+      summary: 'Mes de presupuesto en curso',
+      description: 'El mayor entre el mes calendario de hoy y el período actual de cada tarjeta con día de corte (p. ej. el 28 de octubre, con corte el 26, es noviembre). Úsalo como mes por defecto en resúmenes y movimientos.',
+      ok: [200, 'Mes en curso', ref('CurrentPeriod')],
+    }),
+  },
   '/summary/personal': {
     get: op({
       tag: 'Resúmenes',
@@ -432,10 +506,18 @@ export function buildOpenApi(): Json {
       ].join('\n'),
     },
     servers: [{ url: process.env.API_PUBLIC_URL ?? 'http://localhost:3000', description: 'Servidor de la API' }],
-    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes'].map((name) => ({ name })),
+    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes', 'Dispositivos', 'Importación'].map((name) => ({ name })),
     paths,
     components: {
-      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        deviceToken: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'fsd_…',
+          description: 'Token de dispositivo (app). Solo para GET /categories, GET /instruments, POST /imports/transactions y POST /imports/suggestions.',
+        },
+      },
       schemas: { ...schemas, ...Object.fromEntries(Object.entries(bodies).map(([name, s]) => [name, bodySchema(s)])) },
       responses,
     },

@@ -23,6 +23,20 @@ bun test          # pruebas de integración contra la base fintseft_test (se rec
 bun run typecheck
 ```
 
+### Migraciones
+
+`init-schema.sql` crea siempre el esquema completo. Las bases creadas con una versión anterior se actualizan con
+los archivos de `migrations/`, en orden y como superusuario:
+
+```bash
+psql -h localhost -U <superusuario> -d fintseft -f migrations/001_billing_cut_day.sql
+```
+
+| Migración | Qué agrega |
+|---|---|
+| `001_billing_cut_day.sql` | Día de corte en tarjetas de crédito y mes de presupuesto (`budget_month`) en movimientos |
+| `002_device_tokens.sql` | Tokens de dispositivo (importación desde la app) e índice para detectar posibles duplicados |
+
 ## Cómo funciona el aislamiento
 
 Cada request autenticada abre una transacción y fija `app.household_id` y `app.user_id` (`src/db.ts → withTenant`);
@@ -42,6 +56,36 @@ en cada request, así cambiar de grupo no deja tokens desactualizados.
 - Valores de enums en minúscula: `kind`: `fija|variable`; `type` de movimiento: `ingreso|egreso`;
   `type` de instrumento: `cuenta_corriente|tarjeta_debito|tarjeta_credito`; `scope`: `personal|shared`.
 - Autorización: `Authorization: Bearer <accessToken>` (15 min). Renovar con `/auth/refresh` (rota el token).
+
+## Períodos de facturación
+
+Cada movimiento tiene un **mes de presupuesto** (`budgetMonth`). Por defecto es el mes calendario de su fecha; si se pagó
+con una tarjeta de crédito que tiene **día de corte**, es su período de facturación: hasta el día de corte (incluido)
+cuenta en ese mes y desde el día siguiente, en el siguiente (corte 26: una compra del 27 de octubre es de noviembre).
+Si el mes no tiene ese día (corte 31 en febrero) se usa su último día.
+
+- Lo calcula la base (`period_month`) con triggers: al crear o editar un movimiento, y al cambiar el corte de una
+  tarjeta (se reimputan todos sus movimientos).
+- El filtro `month` de `/transactions` y los resúmenes usan el mes de presupuesto; `from`/`to` siguen siendo fechas.
+- `GET /periods/current` da el mes en curso considerando los cortes; los clientes lo usan como mes por defecto.
+- Limitación: los días transcurridos y el "por día" del resumen usan el mes calendario, porque con cortes distintos por
+  tarjeta no hay un único ciclo. Los ingresos en cuenta corriente siguen por mes calendario.
+
+## Importación desde la app (`app-expense-tracker`)
+
+La app Android registra compras capturadas de las notificaciones del banco. Diseño:
+`docs/superpowers/specs/2026-11-07-importacion-app-design.md`.
+
+- **Token de dispositivo** (`fsd_…`): se crea en la web (`POST /devices`; se muestra una sola vez) y se revoca con
+  `DELETE /devices/:id`. Solo sirve para `GET /categories`, `GET /instruments`, `POST /imports/transactions` y
+  `POST /imports/suggestions`; cualquier otra ruta responde 403.
+- **`POST /imports/transactions`**: lote de hasta 200 compras, idempotente por `externalId`. Cada compra vuelve como
+  `created`, `exists`, `discarded` (importada y luego borrada en FinSelf), `rejected` (con motivo) o
+  `possible_duplicate` (se parece a una digitada a mano: misma tarjeta y monto a ±1 día; se registra igual reenviándola
+  con `confirmDuplicate: true`).
+- **`POST /imports/suggestions`**: categoría más usada por comercio en los últimos 12 meses.
+- **Limitación:** la app envía solo desde la red de la casa, por HTTP (`http://192.168.100.10:8090/api`), así que el
+  token viaja sin cifrar por el wifi. No exponer estas rutas a internet sin HTTPS.
 
 ## Contrato OpenAPI
 

@@ -35,6 +35,12 @@
     },
     {
       "name": "Resúmenes"
+    },
+    {
+      "name": "Dispositivos"
+    },
+    {
+      "name": "Importación"
     }
   ],
   "paths": {
@@ -380,6 +386,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -420,6 +429,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -449,6 +461,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -756,6 +771,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
@@ -773,6 +791,9 @@
         "security": [
           {
             "bearerAuth": []
+          },
+          {
+            "deviceToken": []
           }
         ],
         "parameters": [
@@ -821,6 +842,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -984,6 +1008,9 @@
         "security": [
           {
             "bearerAuth": []
+          },
+          {
+            "deviceToken": []
           }
         ],
         "parameters": [
@@ -1019,6 +1046,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -1028,7 +1058,7 @@
         ],
         "operationId": "createInstrument",
         "summary": "Crear instrumento",
-        "description": "Nunca se guarda el número completo, solo los últimos 4 dígitos.",
+        "description": "Nunca se guarda el número completo, solo los últimos 4 dígitos. `billingCutDay` (solo tarjetas de crédito) imputa cada compra al período de facturación: hasta el día de corte, ese mes; desde el día siguiente, el mes siguiente.",
         "security": [
           {
             "bearerAuth": []
@@ -1061,6 +1091,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           }
@@ -1074,6 +1107,7 @@
         ],
         "operationId": "updateInstrument",
         "summary": "Editar, archivar o restaurar un instrumento",
+        "description": "Cambiar `billingCutDay` reimputa todos los movimientos de la tarjeta. Si deja de ser tarjeta de crédito, pierde el día de corte.",
         "security": [
           {
             "bearerAuth": []
@@ -1117,6 +1151,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -1155,6 +1192,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -1183,7 +1223,7 @@
               "type": "string",
               "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
             },
-            "description": "Mes `YYYY-MM`"
+            "description": "Mes de presupuesto `YYYY-MM`: en tarjetas con día de corte es su período de facturación, no la fecha de calendario"
           },
           {
             "name": "from",
@@ -1335,6 +1375,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       },
@@ -1376,6 +1419,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "422": {
             "$ref": "#/components/responses/Unprocessable"
@@ -1419,6 +1465,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1475,6 +1524,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -1513,8 +1565,259 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/devices": {
+      "get": {
+        "tags": [
+          "Dispositivos"
+        ],
+        "operationId": "listDevices",
+        "summary": "Tokens de dispositivo del usuario",
+        "description": "Nunca incluye el token, solo su prefijo.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dispositivos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Dispositivos"
+        ],
+        "operationId": "createDevice",
+        "summary": "Crear un token de dispositivo",
+        "description": "El token (`fsd_…`) se muestra solo en esta respuesta. Requiere sesión de usuario.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeviceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Dispositivo creado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedDevice"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/devices/{id}": {
+      "delete": {
+        "tags": [
+          "Dispositivos"
+        ],
+        "operationId": "revokeDevice",
+        "summary": "Revocar un token de dispositivo",
+        "description": "Deja de funcionar de inmediato. No borra el registro.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Dispositivo revocado"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/imports/transactions": {
+      "post": {
+        "tags": [
+          "Importación"
+        ],
+        "operationId": "importTransactions",
+        "summary": "Importar compras capturadas por la app",
+        "description": "Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un movimiento digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan \"no reenviar\". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "deviceToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportTransactionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resultado por compra",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/imports/suggestions": {
+      "post": {
+        "tags": [
+          "Importación"
+        ],
+        "operationId": "suggestCategories",
+        "summary": "Sugerir categoría por comercio",
+        "description": "Para cada comercio (hasta 200), la categoría que el usuario más usó para él en los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "deviceToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sugerencias, en el mismo orden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Suggestions"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/periods/current": {
+      "get": {
+        "tags": [
+          "Resúmenes"
+        ],
+        "operationId": "getCurrentPeriod",
+        "summary": "Mes de presupuesto en curso",
+        "description": "El mayor entre el mes calendario de hoy y el período actual de cada tarjeta con día de corte (p. ej. el 28 de octubre, con corte el 26, es noviembre). Úsalo como mes por defecto en resúmenes y movimientos.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mes en curso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentPeriod"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -1541,7 +1844,7 @@
               "type": "string",
               "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
             },
-            "description": "Mes `YYYY-MM`; por defecto el mes actual (zona horaria de la app)"
+            "description": "Mes de presupuesto `YYYY-MM` (en tarjetas con día de corte, su período de facturación); por defecto el mes calendario actual. Ver `GET /periods/current`"
           }
         ],
         "responses": {
@@ -1560,6 +1863,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -1586,7 +1892,7 @@
               "type": "string",
               "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
             },
-            "description": "Mes `YYYY-MM`; por defecto el mes actual (zona horaria de la app)"
+            "description": "Mes de presupuesto `YYYY-MM` (en tarjetas con día de corte, su período de facturación); por defecto el mes calendario actual. Ver `GET /periods/current`"
           }
         ],
         "responses": {
@@ -1605,6 +1911,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }
@@ -1616,6 +1925,12 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "deviceToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "fsd_…",
+        "description": "Token de dispositivo (app). Solo para GET /categories, GET /instruments, POST /imports/transactions y POST /imports/suggestions."
       }
     },
     "schemas": {
@@ -1974,6 +2289,19 @@
               }
             ]
           },
+          "billingCutDay": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31,
+                "description": "Día de corte de la facturación (solo tarjetas de crédito); null = mes calendario"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "archived": {
             "type": "boolean"
           },
@@ -1992,6 +2320,7 @@
           "bank",
           "last4",
           "label",
+          "billingCutDay",
           "archived",
           "createdAt",
           "updatedAt"
@@ -2055,6 +2384,11 @@
             "type": "string",
             "format": "date",
             "description": "YYYY-MM-DD"
+          },
+          "budgetMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "description": "Mes al que se imputa: el calendario de `date`, o el período de facturación si la tarjeta tiene día de corte"
           },
           "type": {
             "type": "string",
@@ -2132,6 +2466,7 @@
         "required": [
           "id",
           "date",
+          "budgetMonth",
           "type",
           "amount",
           "currency",
@@ -2589,6 +2924,408 @@
         ],
         "additionalProperties": false
       },
+      "Device": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Primeros caracteres del token, para reconocerlo"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "createdAt",
+          "lastUsedAt",
+          "revoked"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "additionalProperties": false
+      },
+      "ImportResult": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "Posición de la compra en el lote"
+          },
+          "externalId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "created",
+              "exists",
+              "discarded",
+              "rejected",
+              "possible_duplicate"
+            ]
+          },
+          "transactionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "budgetMonth": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          },
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_item",
+                  "unknown_card",
+                  "ambiguous_card",
+                  "invalid_category"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "transactionId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "YYYY-MM-DD"
+                },
+                "amount": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "categoryName": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "transactionId",
+                "date",
+                "amount",
+                "description",
+                "categoryName"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "index",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "Suggestions": {
+        "type": "object",
+        "properties": {
+          "suggestions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "merchant": {
+                  "type": "string",
+                  "description": "Tal como se envió"
+                },
+                "categoryId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "uses": {
+                  "type": "integer",
+                  "description": "Veces que se usó esa categoría para el comercio en los últimos 12 meses"
+                }
+              },
+              "required": [
+                "merchant",
+                "categoryId",
+                "uses"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "suggestions"
+        ],
+        "additionalProperties": false
+      },
+      "ImportResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImportResult"
+            }
+          },
+          "summary": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "integer"
+              },
+              "exists": {
+                "type": "integer"
+              },
+              "discarded": {
+                "type": "integer"
+              },
+              "rejected": {
+                "type": "integer"
+              },
+              "possible_duplicate": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "created",
+              "exists",
+              "discarded",
+              "rejected",
+              "possible_duplicate"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "results",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "CreatedDevice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string",
+            "description": "Se muestra solo en esta respuesta; guárdalo en la app"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "createdAt",
+          "lastUsedAt",
+          "revoked",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "CurrentPeriod": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+          }
+        },
+        "required": [
+          "month"
+        ],
+        "additionalProperties": false
+      },
+      "CreateDeviceRequest": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "ImportTransactionsRequest": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "externalId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "purchasedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "amountMinor": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000000000000
+                },
+                "currency": {
+                  "type": "string",
+                  "pattern": "^[A-Z]{3}$"
+                },
+                "merchant": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cardLast4": {
+                  "type": "string",
+                  "pattern": "^\\d{4}$"
+                },
+                "categoryId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "confirmDuplicate": {
+                  "description": "true = registrarla aunque se parezca a un movimiento digitado a mano",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "externalId",
+                "purchasedAt",
+                "amountMinor",
+                "currency",
+                "cardLast4",
+                "categoryId"
+              ]
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SuggestionsRequest": {
+        "type": "object",
+        "properties": {
+          "merchants": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        },
+        "required": [
+          "merchants"
+        ]
+      },
       "RegisterRequest": {
         "type": "object",
         "properties": {
@@ -2866,6 +3603,18 @@
                 "type": "null"
               }
             ]
+          },
+          "billingCutDay": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2900,6 +3649,18 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billingCutDay": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
               },
               {
                 "type": "null"

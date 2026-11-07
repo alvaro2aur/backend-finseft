@@ -13,7 +13,7 @@ transactionsRouter.use(authenticate);
 // Movimientos privados: RLS limita todo a las filas del usuario. Las categorías (compartidas o
 // propias) y los instrumentos propios son visibles para el JOIN, incluso archivados.
 export const TXN_SELECT = `
-  SELECT t.id, t.occurred_on, t.type, t.amount, t.currency, t.description, t.source, t.created_at, t.updated_at,
+  SELECT t.id, t.occurred_on, to_char(t.budget_month, 'YYYY-MM') AS budget_month, t.type, t.amount, t.currency, t.description, t.source, t.created_at, t.updated_at,
          t.category_id, c.name AS category_name, c.user_id AS category_user_id,
          t.instrument_id, i.type AS instrument_type, i.bank AS instrument_bank, i.last4 AS instrument_last4
     FROM transactions t
@@ -23,6 +23,7 @@ export const TXN_SELECT = `
 export const txnOut = (r: any) => ({
   id: r.id,
   date: r.occurred_on,
+  budgetMonth: r.budget_month,
   type: r.type,
   amount: r.amount,
   currency: r.currency,
@@ -74,11 +75,8 @@ transactionsRouter.get('/', async (req, res) => {
   const params: unknown[] = [];
   const p = (v: unknown) => (params.push(v), `$${params.length}`);
 
-  if (f.month) {
-    const [y, m] = f.month.split('-').map(Number) as [number, number];
-    const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    where.push(`t.occurred_on >= ${p(`${f.month}-01`)}`, `t.occurred_on < ${p(next)}`);
-  }
+  // `month` es el mes de presupuesto (período de facturación en tarjetas con corte); from/to, fechas de calendario.
+  if (f.month) where.push(`t.budget_month = ${p(`${f.month}-01`)}`);
   if (f.from) where.push(`t.occurred_on >= ${p(f.from)}`);
   if (f.to) where.push(`t.occurred_on <= ${p(f.to)}`);
   if (f.categoryId === 'none') where.push('t.category_id IS NULL');
