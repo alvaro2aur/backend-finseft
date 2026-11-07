@@ -148,11 +148,15 @@ const schemas: Record<string, Json> = {
   }),
   VsPrevious: vsPrevious,
   Health: obj({ status: oneOfEnum('ok') }),
+  Device: obj({ id: uuid(), name: str(), prefix: str({ description: 'Primeros caracteres del token, para reconocerlo' }), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool() }),
+  DeviceList: obj({ items: arr(ref('Device')) }),
+  CreatedDevice: obj({ id: uuid(), name: str(), prefix: str(), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool(), token: str({ description: 'Se muestra solo en esta respuesta; guárdalo en la app' }) }),
   CurrentPeriod: obj({ month: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }) }),
 };
 
 // Cuerpos de request: derivados de zod. `io: 'input'` describe lo que se envía (los defaults quedan opcionales).
 const bodies = {
+  CreateDeviceRequest: S.createDeviceBody,
   RegisterRequest: S.registerBody,
   LoginRequest: S.loginBody,
   GoogleLoginRequest: S.googleBody,
@@ -227,11 +231,14 @@ interface Op {
   ok: [number, string, Json | null]; // [status, descripción, esquema o null (sin cuerpo)]
   errors?: ErrorName[];
   extra?: Record<number, Json>; // respuestas adicionales que no son de la lista común
+  device?: boolean; // también acepta token de dispositivo (app)
 }
 
 function op(o: Op): Json {
   const errors: ErrorName[] = [...(o.errors ?? [])];
   if (o.auth !== false && !errors.includes('Unauthorized')) errors.push('Unauthorized');
+  // Un token de dispositivo puede llegar a cualquier operación protegida y recibir 403.
+  if (o.auth !== false && !errors.includes('Forbidden')) errors.push('Forbidden');
   if (o.body && !errors.includes('BadRequest')) errors.unshift('BadRequest');
   const [status, description, schema] = o.ok;
   return {
@@ -239,7 +246,7 @@ function op(o: Op): Json {
     operationId: o.id,
     summary: o.summary,
     ...(o.description ? { description: o.description } : {}),
-    security: o.auth === false ? [] : [{ bearerAuth: [] }],
+    security: o.auth === false ? [] : o.device ? [{ bearerAuth: [] }, { deviceToken: [] }] : [{ bearerAuth: [] }],
     ...(o.params?.length ? { parameters: o.params } : {}),
     ...(o.body ? { requestBody: { required: true, content: jsonOf(ref(o.body)) } } : {}),
     responses: {
@@ -332,6 +339,7 @@ const paths: Record<string, Json> = {
       summary: 'Categorías visibles',
       description: 'Las compartidas del grupo y las personales del usuario.',
       params: [includeArchived, query('scope', scope, 'Filtra por alcance')],
+      device: true,
       ok: [200, 'Categorías', ref('CategoryList')],
       errors: ['BadRequest'],
     }),
@@ -344,7 +352,7 @@ const paths: Record<string, Json> = {
 
   // --- Instrumentos ---
   '/instruments': {
-    get: op({ tag: 'Instrumentos', id: 'listInstruments', summary: 'Instrumentos propios', description: 'Son privados de cada usuario.', params: [includeArchived], ok: [200, 'Instrumentos', ref('InstrumentList')], errors: ['BadRequest'] }),
+    get: op({ tag: 'Instrumentos', id: 'listInstruments', summary: 'Instrumentos propios', description: 'Son privados de cada usuario.', params: [includeArchived], ok: [200, 'Instrumentos', ref('InstrumentList')], errors: ['BadRequest'], device: true }),
     post: op({ tag: 'Instrumentos', id: 'createInstrument', summary: 'Crear instrumento', description: 'Nunca se guarda el número completo, solo los últimos 4 dígitos. `billingCutDay` (solo tarjetas de crédito) imputa cada compra al período de facturación: hasta el día de corte, ese mes; desde el día siguiente, el mes siguiente.', body: 'CreateInstrumentRequest', ok: [201, 'Instrumento creado', ref('Instrument')], errors: ['Conflict'] }),
   },
   '/instruments/{id}': {
@@ -382,6 +390,15 @@ const paths: Record<string, Json> = {
     get: op({ tag: 'Movimientos', id: 'getTransaction', summary: 'Un movimiento', params: [idParam], ok: [200, 'Movimiento', ref('Transaction')], errors: ['NotFound'] }),
     patch: op({ tag: 'Movimientos', id: 'updateTransaction', summary: 'Editar un movimiento', description: 'Envía solo los campos a cambiar. `categoryId: null` lo deja sin categoría.', params: [idParam], body: 'UpdateTransactionRequest', ok: [200, 'Movimiento actualizado', ref('Transaction')], errors: ['NotFound', 'Unprocessable'] }),
     delete: op({ tag: 'Movimientos', id: 'deleteTransaction', summary: 'Eliminar un movimiento', description: 'Borrado lógico.', params: [idParam], ok: noContent('Movimiento eliminado'), errors: ['NotFound'] }),
+  },
+
+  // --- Dispositivos ---
+  '/devices': {
+    get: op({ tag: 'Dispositivos', id: 'listDevices', summary: 'Tokens de dispositivo del usuario', description: 'Nunca incluye el token, solo su prefijo.', ok: [200, 'Dispositivos', ref('DeviceList')] }),
+    post: op({ tag: 'Dispositivos', id: 'createDevice', summary: 'Crear un token de dispositivo', description: 'El token (`fsd_…`) se muestra solo en esta respuesta. Requiere sesión de usuario.', body: 'CreateDeviceRequest', ok: [201, 'Dispositivo creado', ref('CreatedDevice')] }),
+  },
+  '/devices/{id}': {
+    delete: op({ tag: 'Dispositivos', id: 'revokeDevice', summary: 'Revocar un token de dispositivo', description: 'Deja de funcionar de inmediato. No borra el registro.', params: [idParam], ok: noContent('Dispositivo revocado'), errors: ['NotFound'] }),
   },
 
   // --- Resúmenes ---
@@ -443,10 +460,18 @@ export function buildOpenApi(): Json {
       ].join('\n'),
     },
     servers: [{ url: process.env.API_PUBLIC_URL ?? 'http://localhost:3000', description: 'Servidor de la API' }],
-    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes'].map((name) => ({ name })),
+    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes', 'Dispositivos'].map((name) => ({ name })),
     paths,
     components: {
-      securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' } },
+      securitySchemes: {
+        bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        deviceToken: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'fsd_…',
+          description: 'Token de dispositivo (app). Solo para GET /categories, GET /instruments, POST /imports/transactions y POST /imports/suggestions.',
+        },
+      },
       schemas: { ...schemas, ...Object.fromEntries(Object.entries(bodies).map(([name, s]) => [name, bodySchema(s)])) },
       responses,
     },

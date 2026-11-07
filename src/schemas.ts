@@ -16,6 +16,9 @@ const money = z.number().int().max(1_000_000_000_000);
 const name = z.string().trim().min(1).max(100);
 const currency = z.string().length(3).toUpperCase();
 
+// --- Dispositivos (tokens para la app) ---
+export const createDeviceBody = z.object({ name: z.string().trim().min(1).max(60) });
+
 // --- Autenticación ---
 export const registerBody = z.object({ email, password, displayName: z.string().trim().min(1).max(100).optional() });
 export const loginBody = z.object({ email, password: z.string().min(1).max(200) });
