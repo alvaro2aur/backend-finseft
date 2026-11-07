@@ -71,6 +71,22 @@ Si el mes no tiene ese día (corte 31 en febrero) se usa su último día.
 - Limitación: los días transcurridos y el "por día" del resumen usan el mes calendario, porque con cortes distintos por
   tarjeta no hay un único ciclo. Los ingresos en cuenta corriente siguen por mes calendario.
 
+## Importación desde la app (`app-expense-tracker`)
+
+La app Android registra compras capturadas de las notificaciones del banco. Diseño:
+`docs/superpowers/specs/2026-11-07-importacion-app-design.md`.
+
+- **Token de dispositivo** (`fsd_…`): se crea en la web (`POST /devices`; se muestra una sola vez) y se revoca con
+  `DELETE /devices/:id`. Solo sirve para `GET /categories`, `GET /instruments`, `POST /imports/transactions` y
+  `POST /imports/suggestions`; cualquier otra ruta responde 403.
+- **`POST /imports/transactions`**: lote de hasta 200 compras, idempotente por `externalId`. Cada compra vuelve como
+  `created`, `exists`, `discarded` (importada y luego borrada en FinSelf), `rejected` (con motivo) o
+  `possible_duplicate` (se parece a una digitada a mano: misma tarjeta y monto a ±1 día; se registra igual reenviándola
+  con `confirmDuplicate: true`).
+- **`POST /imports/suggestions`**: categoría más usada por comercio en los últimos 12 meses.
+- **Limitación:** la app envía solo desde la red de la casa, por HTTP (`http://192.168.100.10:8090/api`), así que el
+  token viaja sin cifrar por el wifi. No exponer estas rutas a internet sin HTTPS.
+
 ## Contrato OpenAPI
 
 La API publica su contrato (OpenAPI 3.1) en **`GET /openapi.json`**, y una copia versionada en [`openapi.json`](openapi.json).
