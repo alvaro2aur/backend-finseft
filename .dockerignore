@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.*
+test
+scripts
+migrations
+deploy
+*.log
+.git

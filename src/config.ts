@@ -27,4 +27,7 @@ export const config = {
   appUrl: (env.APP_URL ?? 'http://localhost:5173').replace(/\/$/, ''),
   corsOrigins: (env.CORS_ORIGIN ?? '*').split(',').map((s) => s.trim()).filter(Boolean),
   timezone: env.APP_TIMEZONE ?? 'America/Santiago',
+  // Detrás de un proxy (Caddy): de quién confiar X-Forwarded-For, en el formato de Express
+  // (p. ej. 'loopback, uniquelocal'). Vacío = sin proxy. Afecta la IP que ve el límite de intentos.
+  trustProxy: env.TRUST_PROXY || undefined,
 };
