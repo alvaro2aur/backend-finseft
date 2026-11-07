@@ -5,6 +5,7 @@ import { categoriesRouter } from './categories.ts';
 import { devicesRouter } from './devices.ts';
 import { healthRouter } from './health.ts';
 import { householdRouter } from './household.ts';
+import { importsRouter } from './imports.ts';
 import { instrumentsRouter } from './instruments.ts';
 import { periodsRouter } from './periods.ts';
 import { summaryRouter } from './summary.ts';
@@ -26,4 +27,5 @@ export const mounts: [prefix: string, router: Router][] = [
   ['/summary', summaryRouter],
   ['/periods', periodsRouter],
   ['/devices', devicesRouter],
+  ['/imports', importsRouter],
 ];

@@ -150,6 +150,21 @@ const schemas: Record<string, Json> = {
   Health: obj({ status: oneOfEnum('ok') }),
   Device: obj({ id: uuid(), name: str(), prefix: str({ description: 'Primeros caracteres del token, para reconocerlo' }), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool() }),
   DeviceList: obj({ items: arr(ref('Device')) }),
+  ImportResult: obj(
+    {
+      index: int({ description: 'Posición de la compra en el lote' }),
+      externalId: str(),
+      status: oneOfEnum('created', 'exists', 'discarded', 'rejected', 'possible_duplicate'),
+      transactionId: uuid(),
+      budgetMonth: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }),
+      error: obj({ code: oneOfEnum('invalid_item', 'unknown_card', 'ambiguous_card', 'invalid_category'), message: str(), details: {} }, ['code', 'message']),
+    },
+    ['index', 'status'],
+  ),
+  ImportResponse: obj({
+    results: arr(ref('ImportResult')),
+    summary: obj({ created: int(), exists: int(), discarded: int(), rejected: int(), possible_duplicate: int() }),
+  }),
   CreatedDevice: obj({ id: uuid(), name: str(), prefix: str(), createdAt: dateTime(), lastUsedAt: nullable(dateTime()), revoked: bool(), token: str({ description: 'Se muestra solo en esta respuesta; guárdalo en la app' }) }),
   CurrentPeriod: obj({ month: str({ pattern: '^\\d{4}-(0[1-9]|1[0-2])$' }) }),
 };
@@ -157,6 +172,7 @@ const schemas: Record<string, Json> = {
 // Cuerpos de request: derivados de zod. `io: 'input'` describe lo que se envía (los defaults quedan opcionales).
 const bodies = {
   CreateDeviceRequest: S.createDeviceBody,
+  ImportTransactionsRequest: S.importBodyDoc,
   RegisterRequest: S.registerBody,
   LoginRequest: S.loginBody,
   GoogleLoginRequest: S.googleBody,
@@ -401,6 +417,20 @@ const paths: Record<string, Json> = {
     delete: op({ tag: 'Dispositivos', id: 'revokeDevice', summary: 'Revocar un token de dispositivo', description: 'Deja de funcionar de inmediato. No borra el registro.', params: [idParam], ok: noContent('Dispositivo revocado'), errors: ['NotFound'] }),
   },
 
+  // --- Importación desde la app ---
+  '/imports/transactions': {
+    post: op({
+      tag: 'Importación',
+      id: 'importTransactions',
+      summary: 'Importar compras capturadas por la app',
+      description:
+        'Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`. Para la app, `created`, `exists` y `discarded` significan "no reenviar". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.',
+      body: 'ImportTransactionsRequest',
+      ok: [200, 'Resultado por compra', ref('ImportResponse')],
+      device: true,
+    }),
+  },
+
   // --- Resúmenes ---
   '/periods/current': {
     get: op({
@@ -460,7 +490,7 @@ export function buildOpenApi(): Json {
       ].join('\n'),
     },
     servers: [{ url: process.env.API_PUBLIC_URL ?? 'http://localhost:3000', description: 'Servidor de la API' }],
-    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes', 'Dispositivos'].map((name) => ({ name })),
+    tags: ['Sistema', 'Autenticación', 'Cuenta', 'Grupo', 'Categorías', 'Instrumentos', 'Movimientos', 'Resúmenes', 'Dispositivos', 'Importación'].map((name) => ({ name })),
     paths,
     components: {
       securitySchemes: {

@@ -80,3 +80,20 @@ export const createTransactionBody = z.object({
   currency: currency.optional(),
 });
 export const patchTransactionBody = createTransactionBody.partial().strict();
+
+// --- Importación desde la app ---
+/** Una compra capturada por la app. Se valida por separado para que una inválida no rompa el lote. */
+export const importItem = z.object({
+  externalId: z.string().trim().min(1).max(200),
+  purchasedAt: z.iso.datetime({ offset: true }),
+  amountMinor: z.number().int().min(1).max(1_000_000_000_000),
+  currency: z.string().regex(/^[A-Z]{3}$/, 'Código ISO 4217 de 3 letras'),
+  merchant: z.string().max(200).nullable().optional(),
+  cardLast4: z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos'),
+  categoryId: uuid,
+  confirmDuplicate: z.boolean().optional(),
+});
+export const IMPORT_MAX_ITEMS = 200;
+export const importBody = z.object({ items: z.array(z.unknown()).min(1).max(IMPORT_MAX_ITEMS) });
+/** Solo para documentar el cuerpo en el OpenAPI (la validación real es por elemento). */
+export const importBodyDoc = z.object({ items: z.array(importItem).min(1).max(IMPORT_MAX_ITEMS) });
