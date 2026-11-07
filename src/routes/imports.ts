@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { z } from 'zod';
 import { config } from '../config.ts';
 import { withTenant, type Db } from '../db.ts';
 import { todayISO } from '../lib/dates.ts';
@@ -33,6 +34,18 @@ const reject = (base: Pick<ItemResult, 'index' | 'externalId'>, code: string, me
  * Procesa una compra. Orden: validación → repetida en el lote → ya importada (por externalId) →
  * instrumento → categoría → posible duplicado de una digitada a mano → crear. `seen` guarda el primer resultado de cada externalId del lote.
  */
+/** Ya importada antes (por externalId), aunque después se haya borrado en FinSelf. */
+async function findImported(c: Db, auth: AuthCtx, base: Pick<ItemResult, 'index' | 'externalId'>): Promise<ItemResult | null> {
+  const { rows } = await c.query(
+    `SELECT id, to_char(budget_month, 'YYYY-MM') AS budget_month, deleted_at IS NOT NULL AS deleted
+       FROM transactions WHERE user_id = $1 AND source = $2 AND external_ref = $3`,
+    [auth.userId, SOURCE, base.externalId],
+  );
+  const ex = rows[0];
+  if (!ex) return null;
+  return ex.deleted ? { ...base, status: 'discarded', transactionId: ex.id } : { ...base, status: 'exists', transactionId: ex.id, budgetMonth: ex.budget_month };
+}
+
 async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen: Map<string, ItemResult>): Promise<ItemResult> {
   const parsed = importItem.safeParse(raw);
   if (!parsed.success) {
@@ -46,14 +59,29 @@ async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen
   const earlier = seen.get(it.externalId);
   if (earlier?.transactionId) return { ...base, status: 'exists', transactionId: earlier.transactionId, budgetMonth: earlier.budgetMonth };
 
-  // Ya importada antes, aunque después se haya borrado en FinSelf.
-  const existing = await c.query(
-    `SELECT id, to_char(budget_month, 'YYYY-MM') AS budget_month, deleted_at IS NOT NULL AS deleted
-       FROM transactions WHERE user_id = $1 AND source = $2 AND external_ref = $3`,
-    [auth.userId, SOURCE, it.externalId],
-  );
-  const ex = existing.rows[0];
-  if (ex) return ex.deleted ? { ...base, status: 'discarded', transactionId: ex.id } : { ...base, status: 'exists', transactionId: ex.id, budgetMonth: ex.budget_month };
+  // Todo lo que toca la base va en un savepoint: un error de una compra no aborta el lote.
+  await c.query('SAVEPOINT import_item');
+  try {
+    const r = await importValid(c, auth, it, base);
+    await c.query('RELEASE SAVEPOINT import_item');
+    return r;
+  } catch (e: any) {
+    await c.query('ROLLBACK TO SAVEPOINT import_item');
+    await c.query('RELEASE SAVEPOINT import_item');
+    const code = typeof e?.code === 'string' ? e.code : '';
+    // Otro envío simultáneo del mismo lote la registró primero: ya está.
+    if (code === '23505') {
+      const again = await findImported(c, auth, base);
+      if (again) return again;
+    }
+    if (code.startsWith('22') || code.startsWith('23')) return reject(base, 'invalid_item', 'La base rechazó la compra');
+    throw e;
+  }
+}
+
+async function importValid(c: Db, auth: AuthCtx, it: z.infer<typeof importItem>, base: Pick<ItemResult, 'index' | 'externalId'>): Promise<ItemResult> {
+  const imported = await findImported(c, auth, base);
+  if (imported) return imported;
 
   const instruments = (await c.query(`SELECT id, type FROM instruments WHERE archived_at IS NULL AND last4 = $1`, [it.cardLast4])).rows;
   if (!instruments.length) {
@@ -94,31 +122,13 @@ async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen
     }
   }
 
-  await c.query('SAVEPOINT import_item');
-  try {
-    const { rows } = await c.query(
-      `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, description, source, external_ref)
-       VALUES ($1, $2, $3, 'egreso', $4, 'CLP', $5, $6, $7, $8, $9)
-       RETURNING id, to_char(budget_month, 'YYYY-MM') AS budget_month`,
-      [
-        auth.householdId,
-        auth.userId,
-        date,
-        amount,
-        it.categoryId,
-        instrumentId,
-        importDescription(it.merchant, it.cardLast4, it.amountMinor, it.currency),
-        SOURCE,
-        it.externalId,
-      ],
-    );
-    await c.query('RELEASE SAVEPOINT import_item');
-    return { ...base, status: 'created', transactionId: rows[0].id, budgetMonth: rows[0].budget_month };
-  } catch (e: any) {
-    await c.query('ROLLBACK TO SAVEPOINT import_item');
-    if (typeof e?.code === 'string' && e.code.startsWith('23')) return reject(base, 'invalid_item', 'La base rechazó la compra');
-    throw e;
-  }
+  const { rows } = await c.query(
+    `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, description, source, external_ref)
+     VALUES ($1, $2, $3, 'egreso', $4, 'CLP', $5, $6, $7, $8, $9)
+     RETURNING id, to_char(budget_month, 'YYYY-MM') AS budget_month`,
+    [auth.householdId, auth.userId, date, amount, it.categoryId, instrumentId, importDescription(it.merchant, it.cardLast4, it.amountMinor, it.currency), SOURCE, it.externalId],
+  );
+  return { ...base, status: 'created', transactionId: rows[0].id, budgetMonth: rows[0].budget_month };
 }
 
 importsRouter.post('/transactions', async (req, res) => {

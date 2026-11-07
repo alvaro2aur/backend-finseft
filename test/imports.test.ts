@@ -267,3 +267,28 @@ describe('POST /imports/suggestions', () => {
     expect((await suggest(u.device, Array.from({ length: 201 }, (_, i) => `m${i}`))).status).toBe(400);
   });
 });
+
+describe('cada compra se procesa aislada (revisión final)', () => {
+  test('un carácter NUL en el comercio o en el externalId rechaza solo esa compra', async () => {
+    const u = await setupUser('nul');
+    const r = await importItems(u.device, [
+      item(u.category.id, { merchant: 'MAL\u0000COMERCIO' }),
+      item(u.category.id, { externalId: 'id\u0000raro' }),
+      item(u.category.id, { purchasedAt: '2026-11-15T10:00:00-03:00' }),
+    ]);
+    expect(r.status).toBe(200);
+    expect(r.json.results.map((x: any) => x.status)).toEqual(['rejected', 'rejected', 'created']);
+    expect(r.json.results[0].error.code).toBe('invalid_item');
+  });
+
+  test('dos envíos simultáneos del mismo lote no reportan rechazos falsos', async () => {
+    const u = await setupUser('race');
+    const items = Array.from({ length: 40 }, (_, i) =>
+      item(u.category.id, { purchasedAt: `2026-11-${String(10 + (i % 15)).padStart(2, '0')}T1${i % 10}:00:00-03:00`, amountMinor: 1000 + i }),
+    );
+    const [a, b] = await Promise.all([importItems(u.device, items), importItems(u.device, items)]);
+    const statuses = [...a.json.results, ...b.json.results].map((r: any) => r.status);
+    expect(statuses.filter((s) => s === 'rejected')).toEqual([]);
+    expect(statuses.filter((s) => s === 'created')).toHaveLength(40);
+  });
+});

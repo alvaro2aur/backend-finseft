@@ -82,13 +82,15 @@ export const createTransactionBody = z.object({
 export const patchTransactionBody = createTransactionBody.partial().strict();
 
 // --- Importación desde la app ---
+// Postgres no acepta el carácter NUL en texto: se rechaza al validar, no al insertar.
+const noNul = (v: string) => !v.includes('\u0000');
 /** Una compra capturada por la app. Se valida por separado para que una inválida no rompa el lote. */
 export const importItem = z.object({
-  externalId: z.string().trim().min(1).max(200),
+  externalId: z.string().trim().min(1).max(200).refine(noNul, 'Contiene un carácter no permitido'),
   purchasedAt: z.iso.datetime({ offset: true }),
   amountMinor: z.number().int().min(1).max(1_000_000_000_000),
   currency: z.string().regex(/^[A-Z]{3}$/, 'Código ISO 4217 de 3 letras'),
-  merchant: z.string().max(200).nullable().optional(),
+  merchant: z.string().max(200).refine(noNul, 'Contiene un carácter no permitido').nullable().optional(),
   cardLast4: z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos'),
   categoryId: uuid,
   confirmDuplicate: z.boolean().optional().describe('true = registrarla aunque se parezca a un movimiento digitado a mano'),
