@@ -5,7 +5,7 @@ import { pool, tx, type Db } from '../db.ts';
 import { HttpError } from '../errors.ts';
 import { verifyGoogleToken } from '../lib/google.ts';
 import { send } from '../lib/mailer.ts';
-import { issueSession, publicSession, toUser, USER_COLUMNS, type UserRow } from '../lib/session.ts';
+import { issueSession, publicSession, toUser, USER_COLUMNS, userColumnsOf, type UserRow } from '../lib/session.ts';
 import { randomToken, sha256 } from '../lib/tokens.ts';
 import { authenticate } from '../middleware/auth.ts';
 import { forgotPasswordBody, googleBody, loginBody, patchMeBody, refreshBody, registerBody, resetPasswordBody } from '../schemas.ts';
@@ -65,7 +65,7 @@ authRouter.post('/google', async (req, res) => {
   const out = await tx(async (c) => {
     let user: UserRow | undefined;
     const byIdentity = await c.query<UserRow>(
-      `SELECT ${USER_COLUMNS.split(', ').map((x) => `u.${x}`).join(', ')}
+      `SELECT ${userColumnsOf('u')}
          FROM user_identities i JOIN users u ON u.id = i.user_id
         WHERE i.provider = 'google' AND i.provider_sub = $1`,
       [profile.sub],

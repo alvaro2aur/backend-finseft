@@ -56,8 +56,12 @@ async function importOne(c: Db, auth: AuthCtx, raw: unknown, index: number, seen
   const it = parsed.data;
   const base = { index, externalId: it.externalId };
 
+  // Repetida en el mismo lote: misma respuesta que la primera (un 'discarded' sigue siendo 'discarded').
   const earlier = seen.get(it.externalId);
-  if (earlier?.transactionId) return { ...base, status: 'exists', transactionId: earlier.transactionId, budgetMonth: earlier.budgetMonth };
+  if (earlier?.transactionId) {
+    if (earlier.status === 'discarded') return { ...base, status: 'discarded', transactionId: earlier.transactionId };
+    return { ...base, status: 'exists', transactionId: earlier.transactionId, budgetMonth: earlier.budgetMonth };
+  }
 
   // Todo lo que toca la base va en un savepoint: un error de una compra no aborta el lote.
   await c.query('SAVEPOINT import_item');
@@ -106,7 +110,7 @@ async function importValid(c: Db, auth: AuthCtx, it: z.infer<typeof importItem>,
     const similar = await c.query(
       `SELECT t.id, t.occurred_on, t.amount, t.description, c.name AS category_name
          FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-        WHERE t.user_id = $1 AND t.source = 'manual' AND t.deleted_at IS NULL
+        WHERE t.user_id = $1 AND t.source = 'manual' AND t.type = 'egreso' AND t.deleted_at IS NULL
           AND t.instrument_id = $2 AND t.amount = $3
           AND t.occurred_on BETWEEN $4::date - 1 AND $4::date + 1
         ORDER BY abs(t.occurred_on - $4::date), t.occurred_on
@@ -160,7 +164,7 @@ importsRouter.post('/suggestions', async (req, res) => {
       `WITH hist AS (
          SELECT ${MERCHANT_SQL} AS merchant, t.category_id, count(*)::int AS uses, max(t.occurred_on) AS last_on
            FROM transactions t JOIN categories c ON c.id = t.category_id
-          WHERE t.user_id = $2 AND t.deleted_at IS NULL AND c.archived_at IS NULL
+          WHERE t.user_id = $2 AND t.type = 'egreso' AND t.deleted_at IS NULL AND c.archived_at IS NULL
             AND t.occurred_on >= $3::date - interval '12 months'
           GROUP BY 1, 2
        )

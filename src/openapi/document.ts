@@ -427,10 +427,11 @@ const paths: Record<string, Json> = {
       id: 'importTransactions',
       summary: 'Importar compras capturadas por la app',
       description:
-        'Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un movimiento digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan "no reenviar". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.',
+        'Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un egreso digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan "no reenviar". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.',
       body: 'ImportTransactionsRequest',
       ok: [200, 'Resultado por compra', ref('ImportResponse')],
       device: true,
+      extra: { 413: { description: 'El cuerpo supera 1 MB (`payload_too_large`)', content: jsonOf(ref('Error')) } },
     }),
   },
 
@@ -440,10 +441,11 @@ const paths: Record<string, Json> = {
       id: 'suggestCategories',
       summary: 'Sugerir categoría por comercio',
       description:
-        'Para cada comercio (hasta 200), la categoría que el usuario más usó para él en los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.',
+        'Para cada comercio (hasta 200), la categoría que el usuario más usó para él en sus egresos de los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.',
       body: 'SuggestionsRequest',
       ok: [200, 'Sugerencias, en el mismo orden', ref('Suggestions')],
       device: true,
+      extra: { 413: { description: 'El cuerpo supera 1 MB (`payload_too_large`)', content: jsonOf(ref('Error')) } },
     }),
   },
 

@@ -53,4 +53,7 @@ export const toUser = (u: UserRow) => ({
   householdRole: u.household_role,
 });
 
-export const USER_COLUMNS = 'id, email, display_name, currency, household_id, household_role';
+export const USER_COLUMN_LIST = ['id', 'email', 'display_name', 'currency', 'household_id', 'household_role'] as const;
+export const USER_COLUMNS = USER_COLUMN_LIST.join(', ');
+/** Las mismas columnas con un alias de tabla, para consultas con JOIN (p. ej. `u.id, u.email, …`). */
+export const userColumnsOf = (alias: string) => USER_COLUMN_LIST.map((c) => `${alias}.${c}`).join(', ');

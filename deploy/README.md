@@ -41,6 +41,22 @@ docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d fintseft' < backend
 4. Agrega la URL pública (`https://finself.<tu-tailnet>.ts.net`) a `PUBLIC_URLS` y a `APP_URL`, y reinicia la API:
    `docker compose up -d api`.
 
+> **Antes de encender Funnel:** las rutas del token de dispositivo (`/api/imports/*`, y `/api/categories` e
+> `/api/instruments` con ese token) quedarían accesibles desde internet. El token viaja **sin cifrar** por el wifi de
+> la casa (la app usa HTTP en la red local), así que alguien que lo capture podría usarlo desde fuera. Si se enciende
+> Funnel, bloquea esas rutas para las peticiones que llegan por el túnel (Tailscale agrega la cabecera
+> `Tailscale-Funnel-Request`), por ejemplo en el `Caddyfile`:
+>
+> ```
+> @funnel_import {
+> 	header Tailscale-Funnel-Request *
+> 	path /api/imports/* /api/devices*
+> }
+> respond @funnel_import 403
+> ```
+>
+> o revoca y recrea los tokens de dispositivo después de usarlos fuera de casa.
+
 ## Respaldos
 
 ```bash

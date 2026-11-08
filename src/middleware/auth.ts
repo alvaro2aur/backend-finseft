@@ -3,7 +3,7 @@ import { HttpError } from '../errors.ts';
 import { pool, type TenantCtx } from '../db.ts';
 import { DEVICE_TOKEN_PREFIX } from '../lib/deviceTokens.ts';
 import { sha256, verifyAccessToken } from '../lib/tokens.ts';
-import { USER_COLUMNS, type UserRow } from '../lib/session.ts';
+import { USER_COLUMNS, userColumnsOf, type UserRow } from '../lib/session.ts';
 
 export interface AuthCtx extends TenantCtx {
   email: string;
@@ -47,7 +47,7 @@ const toCtx = (u: UserRow, kind: AuthCtx['kind'], deviceId?: string): AuthCtx =>
 async function deviceAuth(req: Request, token: string): Promise<AuthCtx> {
   const { rows } = await pool.query<UserRow & { device_id: string; fresh: boolean }>(
     `SELECT d.id AS device_id, COALESCE(d.last_used_at > now() - interval '60 seconds', false) AS fresh,
-            ${USER_COLUMNS.split(', ').map((c) => `u.${c}`).join(', ')}
+            ${userColumnsOf('u')}
        FROM device_tokens d JOIN users u ON u.id = d.user_id
       WHERE d.token_hash = $1 AND d.revoked_at IS NULL`,
     [sha256(token)],

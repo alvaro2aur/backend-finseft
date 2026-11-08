@@ -18,13 +18,17 @@ export function localDate(isoDateTime: string, tz: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(isoDateTime));
 }
 
-/** Clave para comparar comercios: minúsculas, sin espacios sobrantes. Debe coincidir con MERCHANT_SQL. */
+/**
+ * Clave para comparar comercios: minúsculas, sin espacios sobrantes; el espacio no separable (NBSP)
+ * cuenta como espacio. Debe dar lo mismo que MERCHANT_SQL.
+ */
 export function normalizeMerchant(s: string): string {
-  return s.trim().replace(/\s+/g, ' ').toLowerCase();
+  return s.replace(/\u00a0/g, ' ').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /**
  * La misma normalización en SQL sobre `transactions.description`, quitando antes la nota de moneda que
- * agrega importDescription ("… · USD 12,34 (monto original, ajustar a pesos)").
+ * agrega importDescription ("… · USD 12,34 (monto original, ajustar a pesos)"). En Postgres `\s` y `trim()`
+ * no tratan el NBSP como espacio, por eso se traduce explícitamente (chr(160)).
  */
-export const MERCHANT_SQL = String.raw`lower(regexp_replace(regexp_replace(trim(t.description), ' · [A-Z]{3} .*\(monto original, ajustar a pesos\)$', ''), '\s+', ' ', 'g'))`;
+export const MERCHANT_SQL = String.raw`lower(regexp_replace(btrim(translate(regexp_replace(t.description, ' · [A-Z]{3} .*\(monto original, ajustar a pesos\)$', ''), chr(160), ' ')), '[[:space:]]+', ' ', 'g'))`;

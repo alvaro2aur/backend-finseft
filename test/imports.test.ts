@@ -292,3 +292,51 @@ describe('cada compra se procesa aislada (revisión final)', () => {
     expect(statuses.filter((s) => s === 'created')).toHaveLength(40);
   });
 });
+
+describe('hallazgos menores de la revisión', () => {
+  test('un externalId repetido tras uno descartado vuelve como discarded', async () => {
+    const u = await setupUser('rep');
+    const it = item(u.category.id, { merchant: 'REPETIDA' });
+    const created = (await importItems(u.device, [it])).json.results[0];
+    await api('DELETE', `/transactions/${created.transactionId}`, { token: u.user.token });
+    const r = (await importItems(u.device, [it, it])).json.results;
+    expect(r.map((x: any) => x.status)).toEqual(['discarded', 'discarded']);
+  });
+
+  test('un lote de 200 compras con los campos al máximo se acepta', async () => {
+    const u = await setupUser('big');
+    const items = Array.from({ length: 200 }, (_, i) =>
+      item(u.category.id, { externalId: `${'x'.repeat(190)}-${String(i).padStart(4, '0')}`, merchant: 'M'.repeat(200), amountMinor: 5000 + i }),
+    );
+    const r = await importItems(u.device, items);
+    expect(r.status).toBe(200);
+    expect(r.json.summary.created).toBe(200);
+  });
+
+  test('un cuerpo demasiado grande responde 413 con el formato de error, no 500', async () => {
+    const u = await setupUser('huge');
+    const r = await api('POST', '/imports/transactions', { token: u.device, body: { items: [{ merchant: 'x'.repeat(2_000_000) }] } });
+    expect(r.status).toBe(413);
+    expect(r.json.error.code).toBe('payload_too_large');
+  });
+
+  test('un comercio con espacio no separable (NBSP) igual recibe sugerencia', async () => {
+    const u = await setupUser('nbsp');
+    await u.post('/transactions', { date: '2026-10-10', type: 'egreso', amount: 1000, description: 'LIDER EXPRESS', instrumentId: u.card.id, categoryId: u.category.id });
+    const s = (await api('POST', '/imports/suggestions', { token: u.device, body: { merchants: ['Lider Express', 'Lider Express'] } })).json.suggestions;
+    expect(s.map((x: any) => x.categoryId)).toEqual([u.category.id, u.category.id]);
+  });
+
+  test('un ingreso digitado a mano no es posible duplicado', async () => {
+    const u = await setupUser('ingdup');
+    await u.post('/transactions', { date: '2026-11-03', type: 'ingreso', amount: 12490, description: 'Devolución farmacia', instrumentId: u.card.id, categoryId: u.category.id });
+    expect((await importItems(u.device, [item(u.category.id)])).json.results[0].status).toBe('created');
+  });
+
+  test('los ingresos no generan sugerencias de categoría', async () => {
+    const u = await setupUser('ingsug');
+    await u.post('/transactions', { date: '2026-10-10', type: 'ingreso', amount: 5000, description: 'DEVOLUCION TIENDA', instrumentId: u.card.id, categoryId: u.category.id });
+    const s = (await api('POST', '/imports/suggestions', { token: u.device, body: { merchants: ['devolucion tienda'] } })).json.suggestions;
+    expect(s[0].categoryId).toBeNull();
+  });
+});
