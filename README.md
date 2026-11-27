@@ -84,7 +84,7 @@ La app Android registra compras capturadas de las notificaciones del banco. Dise
   `possible_duplicate` (se parece a una digitada a mano: misma tarjeta y monto a ±1 día; se registra igual reenviándola
   con `confirmDuplicate: true`).
 - **`POST /imports/suggestions`**: categoría más usada por comercio en los últimos 12 meses.
-- **Limitación:** la app envía solo desde la red de la casa, por HTTP (`http://192.168.100.10:8090/api`), así que el
+- **Limitación:** la app envía solo desde la red de la casa, por HTTP (`http://192.168.100.11:8090/api`), así que el
   token viaja sin cifrar por el wifi. No exponer estas rutas a internet sin HTTPS.
 
 ## Contrato OpenAPI
