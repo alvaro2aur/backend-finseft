@@ -107,6 +107,8 @@ Reglas por elemento:
     `· USD 12,34 (monto original, ajustar a pesos)`. No hay tabla de decimales por moneda: el contrato es "centésimas",
     tal como lo envía la app.
 - **Descripción:** el comercio recortado. Si viene vacío: "Compra con tarjeta ····{last4}".
+  > **Actualizado (migración 003):** el comercio va en su propia columna `merchant` y `description` es el texto
+  > opcional que escribe el usuario en la app (`null` si no escribe nada); la nota de moneda se agrega a `description`.
 - **Tipo:** siempre `egreso`. **Origen:** `source = 'app-android'`, `external_ref = externalId`.
 - **Idempotencia:** si ya existe un movimiento con ese `(user_id, source, external_ref)`:
   - vigente → `exists`, con su id;
@@ -154,6 +156,7 @@ Cuerpo: `{ merchants: string[] }` (hasta 200). Respuesta:
 - Se compara el comercio **normalizado** (minúsculas, espacios recortados y colapsados) con la descripción normalizada de
   los movimientos **propios** del usuario (RLS) de los últimos 12 meses, no borrados, con categoría no archivada. En los
   importados se descarta la nota de moneda.
+  > **Actualizado (migración 003):** se compara con `merchant` y, si el movimiento no tiene, con su descripción.
 - Sugiere la categoría más usada para ese comercio; ante empate, la más reciente. `uses` es cuántas veces se usó.
   Sin historial → `categoryId: null`.
 

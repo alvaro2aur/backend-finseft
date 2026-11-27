@@ -13,7 +13,7 @@ transactionsRouter.use(authenticate);
 // Movimientos privados: RLS limita todo a las filas del usuario. Las categorías (compartidas o
 // propias) y los instrumentos propios son visibles para el JOIN, incluso archivados.
 export const TXN_SELECT = `
-  SELECT t.id, t.occurred_on, to_char(t.budget_month, 'YYYY-MM') AS budget_month, t.type, t.amount, t.currency, t.description, t.source, t.created_at, t.updated_at,
+  SELECT t.id, t.occurred_on, to_char(t.budget_month, 'YYYY-MM') AS budget_month, t.type, t.amount, t.currency, t.description, t.merchant, t.source, t.created_at, t.updated_at,
          t.category_id, c.name AS category_name, c.user_id AS category_user_id,
          t.instrument_id, i.type AS instrument_type, i.bank AS instrument_bank, i.last4 AS instrument_last4
     FROM transactions t
@@ -28,6 +28,7 @@ export const txnOut = (r: any) => ({
   amount: r.amount,
   currency: r.currency,
   description: r.description,
+  merchant: r.merchant,
   categoryId: r.category_id,
   categoryName: r.category_name,
   categoryScope: r.category_id ? (r.category_user_id ? 'personal' : 'shared') : null,
@@ -41,7 +42,8 @@ export const txnOut = (r: any) => ({
 const SORT: Record<string, string> = {
   date: 't.occurred_on',
   category: 'lower(c.name)',
-  description: 'lower(t.description)',
+  // Lo que muestra la web: la descripción o, si no hay, el comercio. Sin espacio tras la coma: ", " separa columnas.
+  description: 'lower(COALESCE(t.description,t.merchant))',
   type: 't.type',
   instrument: 'i.type, lower(i.bank), i.last4',
   amount: 't.amount',
@@ -81,7 +83,10 @@ transactionsRouter.get('/', async (req, res) => {
   if (f.to) where.push(`t.occurred_on <= ${p(f.to)}`);
   if (f.categoryId === 'none') where.push('t.category_id IS NULL');
   else if (f.categoryId) where.push(`t.category_id = ${p(f.categoryId)}`);
-  if (f.q) where.push(`t.description ILIKE ${p(`%${f.q.replace(/[\\%_]/g, '\\$&')}%`)}`);
+  if (f.q) {
+    const like = p(`%${f.q.replace(/[\\%_]/g, '\\$&')}%`);
+    where.push(`(t.description ILIKE ${like} OR t.merchant ILIKE ${like})`);
+  }
   if (f.type) where.push(`t.type = ${p(f.type)}`);
   if (f.instrumentId) where.push(`t.instrument_id = ${p(f.instrumentId)}`);
   if (f.minAmount) where.push(`t.amount >= ${p(f.minAmount)}`);
@@ -90,7 +95,7 @@ transactionsRouter.get('/', async (req, res) => {
   const dir = f.sortDir === 'asc' ? 'ASC' : 'DESC';
   const orderBy = SORT[f.sortBy]!
     .split(', ')
-    .map((e) => `${e} ${dir}${f.sortBy === 'category' ? ' NULLS LAST' : ''}`)
+    .map((e) => `${e} ${dir}${f.sortBy === 'category' || f.sortBy === 'description' ? ' NULLS LAST' : ''}`)
     .concat(['t.occurred_on DESC', 't.created_at DESC', 't.id'])
     .join(', ');
 
@@ -127,9 +132,9 @@ transactionsRouter.post('/', async (req, res) => {
   const b = createTransactionBody.parse(req.body);
   const out = await withTenant(req.auth, async (c) => {
     const { rows } = await c.query(
-      `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, description)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [req.auth.householdId, req.auth.userId, b.date, b.type, b.amount, b.currency ?? req.auth.currency, b.categoryId ?? null, b.instrumentId, b.description],
+      `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, description, merchant)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [req.auth.householdId, req.auth.userId, b.date, b.type, b.amount, b.currency ?? req.auth.currency, b.categoryId ?? null, b.instrumentId, b.description ?? null, b.merchant ?? null],
     );
     return fetchOne(c, rows[0].id);
   });
@@ -145,6 +150,7 @@ transactionsRouter.patch('/:id', async (req, res) => {
       type: b.type,
       amount: b.amount,
       description: b.description,
+      merchant: b.merchant,
       instrument_id: b.instrumentId,
       category_id: b.categoryId,
       currency: b.currency,

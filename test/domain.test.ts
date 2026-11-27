@@ -301,3 +301,33 @@ describe('roles y salida del grupo', () => {
     expect((await api('POST', '/household/leave', { token: A.token })).status).toBe(409);
   });
 });
+
+describe('comercio y descripción opcional', () => {
+  test('se crea, edita y busca por comercio; la descripción puede faltar', async () => {
+    const u = await signup(uniqueEmail('merch'));
+    const instrumentId = (await api('POST', '/instruments', { token: u.token, body: { type: 'cuenta_corriente', bank: 'Banco', last4: '1111' } })).json.id;
+    const base = { date: '2026-05-02', type: 'egreso', amount: 1000, instrumentId };
+
+    const sinNada = await api('POST', '/transactions', { token: u.token, body: base });
+    expect(sinNada.status).toBe(201);
+    expect(sinNada.json).toMatchObject({ description: null, merchant: null });
+
+    const conComercio = (await api('POST', '/transactions', { token: u.token, body: { ...base, merchant: ' Unimarc ', description: '  ' } })).json;
+    expect(conComercio).toMatchObject({ merchant: 'Unimarc', description: null });
+
+    const editado = await api('PATCH', `/transactions/${conComercio.id}`, { token: u.token, body: { description: 'Once', merchant: '' } });
+    expect(editado.json).toMatchObject({ description: 'Once', merchant: null });
+    await api('PATCH', `/transactions/${conComercio.id}`, { token: u.token, body: { merchant: 'Unimarc Ñuñoa' } });
+
+    const q = async (text: string) => (await api('GET', `/transactions?q=${encodeURIComponent(text)}`, { token: u.token })).json.items.map((t: any) => t.id);
+    expect(await q('UNIMARC')).toEqual([conComercio.id]);
+    expect(await q('once')).toEqual([conComercio.id]);
+
+    const byDesc = (await api('GET', '/transactions?sortBy=description&sortDir=desc', { token: u.token })).json.items;
+    expect(byDesc.at(-1).description).toBeNull(); // sin descripción al final
+    const soloComercio = (await api('POST', '/transactions', { token: u.token, body: { ...base, merchant: 'Abarrotes' } })).json;
+    const asc = (await api('GET', '/transactions?sortBy=description&sortDir=asc', { token: u.token })).json.items;
+    expect(asc.map((t: any) => t.id)).toEqual([soloComercio.id, conComercio.id, sinNada.json.id]); // ordena por lo que se muestra
+    expect((await api('POST', '/transactions', { token: u.token, body: { ...base, merchant: 'x'.repeat(201) } })).status).toBe(400);
+  });
+});

@@ -8,11 +8,11 @@ describe('reglas de importación', () => {
     expect(toClpAmount(40, 'USD')).toBe(1);
   });
 
-  test('descripción: el comercio; sin comercio, la tarjeta; otra moneda, con nota', () => {
-    expect(importDescription('LIDER EXPRESS', '4082', 42380, 'CLP')).toBe('LIDER EXPRESS');
-    expect(importDescription('  ', '4082', 1, 'CLP')).toBe('Compra con tarjeta ····4082');
-    expect(importDescription(undefined, '4082', 1, 'CLP')).toBe('Compra con tarjeta ····4082');
-    expect(importDescription('AMAZON', '4082', 1234, 'USD')).toBe('AMAZON · USD 12,34 (monto original, ajustar a pesos)');
+  test('descripción: la del usuario o null; otra moneda, con la nota del monto original', () => {
+    expect(importDescription('Regalo para mamá', 42380, 'CLP')).toBe('Regalo para mamá');
+    expect(importDescription(undefined, 1, 'CLP')).toBeNull();
+    expect(importDescription('Libro', 1234, 'USD')).toBe('Libro · USD 12,34 (monto original, ajustar a pesos)');
+    expect(importDescription(null, 1234, 'USD')).toBe('USD 12,34 (monto original, ajustar a pesos)');
   });
 
   test('la fecha es la de Chile, no la de UTC', () => {

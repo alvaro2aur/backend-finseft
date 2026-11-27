@@ -21,7 +21,7 @@ interface ItemResult {
   transactionId?: string;
   budgetMonth?: string;
   error?: { code: string; message: string; details?: unknown };
-  matches?: { transactionId: string; date: string; amount: number; description: string; categoryName: string | null }[];
+  matches?: { transactionId: string; date: string; amount: number; description: string | null; merchant: string | null; categoryName: string | null }[];
 }
 
 const reject = (base: Pick<ItemResult, 'index' | 'externalId'>, code: string, message: string, details?: unknown): ItemResult => ({
@@ -108,7 +108,7 @@ async function importValid(c: Db, auth: AuthCtx, it: z.infer<typeof importItem>,
   // ¿Ya la digitó a mano? Misma tarjeta y monto, a ±1 día. Sin confirmación no se crea: decide el usuario.
   if (!it.confirmDuplicate) {
     const similar = await c.query(
-      `SELECT t.id, t.occurred_on, t.amount, t.description, c.name AS category_name
+      `SELECT t.id, t.occurred_on, t.amount, t.description, t.merchant, c.name AS category_name
          FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
         WHERE t.user_id = $1 AND t.source = 'manual' AND t.type = 'egreso' AND t.deleted_at IS NULL
           AND t.instrument_id = $2 AND t.amount = $3
@@ -121,16 +121,19 @@ async function importValid(c: Db, auth: AuthCtx, it: z.infer<typeof importItem>,
       return {
         ...base,
         status: 'possible_duplicate',
-        matches: similar.rows.map((r) => ({ transactionId: r.id, date: r.occurred_on, amount: r.amount, description: r.description, categoryName: r.category_name })),
+        matches: similar.rows.map((r) => ({ transactionId: r.id, date: r.occurred_on, amount: r.amount, description: r.description, merchant: r.merchant, categoryName: r.category_name })),
       };
     }
   }
 
   const { rows } = await c.query(
-    `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, description, source, external_ref)
-     VALUES ($1, $2, $3, 'egreso', $4, 'CLP', $5, $6, $7, $8, $9)
+    `INSERT INTO transactions (household_id, user_id, occurred_on, type, amount, currency, category_id, instrument_id, merchant, description, source, external_ref)
+     VALUES ($1, $2, $3, 'egreso', $4, 'CLP', $5, $6, $7, $8, $9, $10)
      RETURNING id, to_char(budget_month, 'YYYY-MM') AS budget_month`,
-    [auth.householdId, auth.userId, date, amount, it.categoryId, instrumentId, importDescription(it.merchant, it.cardLast4, it.amountMinor, it.currency), SOURCE, it.externalId],
+    [
+      auth.householdId, auth.userId, date, amount, it.categoryId, instrumentId,
+      it.merchant ?? null, importDescription(it.description, it.amountMinor, it.currency), SOURCE, it.externalId,
+    ],
   );
   return { ...base, status: 'created', transactionId: rows[0].id, budgetMonth: rows[0].budget_month };
 }

@@ -69,12 +69,25 @@ export const patchInstrumentBody = z
   })
   .strict();
 
+// Postgres no acepta el carácter NUL en texto: se rechaza al validar, no al insertar.
+const noNul = (v: string) => !v.includes('\u0000');
+/** Texto libre opcional (descripción, comercio): sin espacios sobrantes; vacío equivale a null. */
+const optionalText = z
+  .string()
+  .trim()
+  .max(200)
+  .refine(noNul, 'Contiene un carácter no permitido')
+  .transform((v) => v || null)
+  .nullable()
+  .optional();
+
 // --- Movimientos ---
 export const createTransactionBody = z.object({
   date: isoDate,
   type: txnType,
   amount: money.min(1),
-  description: z.string().trim().min(1).max(200),
+  description: optionalText,
+  merchant: optionalText.describe('Comercio (las compras importadas desde la app lo traen)'),
   instrumentId: uuid,
   categoryId: uuid.nullable().optional(),
   currency: currency.optional(),
@@ -82,15 +95,14 @@ export const createTransactionBody = z.object({
 export const patchTransactionBody = createTransactionBody.partial().strict();
 
 // --- Importación desde la app ---
-// Postgres no acepta el carácter NUL en texto: se rechaza al validar, no al insertar.
-const noNul = (v: string) => !v.includes('\u0000');
 /** Una compra capturada por la app. Se valida por separado para que una inválida no rompa el lote. */
 export const importItem = z.object({
   externalId: z.string().trim().min(1).max(200).refine(noNul, 'Contiene un carácter no permitido'),
   purchasedAt: z.iso.datetime({ offset: true }),
   amountMinor: z.number().int().min(1).max(1_000_000_000_000),
   currency: z.string().regex(/^[A-Z]{3}$/, 'Código ISO 4217 de 3 letras'),
-  merchant: z.string().max(200).refine(noNul, 'Contiene un carácter no permitido').nullable().optional(),
+  merchant: optionalText,
+  description: optionalText.describe('Descripción escrita por el usuario en la app'),
   cardLast4: z.string().regex(/^\d{4}$/, 'Deben ser exactamente 4 dígitos'),
   categoryId: uuid,
   confirmDuplicate: z.boolean().optional().describe('true = registrarla aunque se parezca a un movimiento digitado a mano'),
