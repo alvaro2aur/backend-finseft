@@ -29,13 +29,14 @@ bun run typecheck
 los archivos de `migrations/`, en orden y como superusuario:
 
 ```bash
-psql -h localhost -U <superusuario> -d fintseft -f migrations/001_billing_cut_day.sql
+psql -h localhost -U <superusuario> -d fintseft -f migrations/003_transaction_merchant.sql   # una por una, en orden
 ```
 
 | Migración | Qué agrega |
 |---|---|
 | `001_billing_cut_day.sql` | Día de corte en tarjetas de crédito y mes de presupuesto (`budget_month`) en movimientos |
 | `002_device_tokens.sql` | Tokens de dispositivo (importación desde la app) e índice para detectar posibles duplicados |
+| `003_transaction_merchant.sql` | Comercio (`merchant`) en movimientos y descripción opcional; copia el comercio de las compras ya importadas |
 
 ## Cómo funciona el aislamiento
 
@@ -83,7 +84,10 @@ La app Android registra compras capturadas de las notificaciones del banco. Dise
   `created`, `exists`, `discarded` (importada y luego borrada en FinSelf), `rejected` (con motivo) o
   `possible_duplicate` (se parece a una digitada a mano: misma tarjeta y monto a ±1 día; se registra igual reenviándola
   con `confirmDuplicate: true`).
-- **`POST /imports/suggestions`**: categoría más usada por comercio en los últimos 12 meses.
+- Cada compra importada guarda el comercio en `merchant` y, en `description`, lo que escribió el usuario en la app
+  (opcional; `null` si no escribió nada). En otra moneda, a la descripción se le agrega el monto original.
+- **`POST /imports/suggestions`**: categoría más usada por comercio en los últimos 12 meses. Compara con el comercio de
+  cada movimiento o, si no tiene (los digitados a mano), con su descripción.
 - **Limitación:** la app envía solo desde la red de la casa, por HTTP (`http://192.168.100.11:8090/api`), así que el
   token viaja sin cifrar por el wifi. No exponer estas rutas a internet sin HTTPS.
 
@@ -145,8 +149,8 @@ bun test
 | DELETE | `/categories/:id` | archiva |
 | GET / POST | `/instruments` | `type, bank, last4, label?` |
 | PATCH / DELETE | `/instruments/:id` | DELETE archiva |
-| GET | `/transactions` | filtros `month, from, to, categoryId (uuid\|none), q, type, instrumentId, minAmount`; `sortBy` (`date,category,description,type,instrument,amount`), `sortDir`, `page`, `pageSize (≤100)` → `{items, page, pageSize, total, totals{income,expense,balance}}` (totales del conjunto filtrado) |
-| GET / POST | `/transactions` `/transactions/:id` | POST: `date, type, amount, description, instrumentId, categoryId?, currency?` |
+| GET | `/transactions` | filtros `month, from, to, categoryId (uuid\|none), q, type, instrumentId, minAmount` (`q` busca en descripción o comercio); `sortBy` (`date,category,description,type,instrument,amount`), `sortDir`, `page`, `pageSize (≤100)` → `{items, page, pageSize, total, totals{income,expense,balance}}` (totales del conjunto filtrado) |
+| GET / POST | `/transactions` `/transactions/:id` | POST: `date, type, amount, instrumentId, description?, merchant?, categoryId?, currency?` (texto vacío = `null`) |
 | PATCH / DELETE | `/transactions/:id` | DELETE es lógico |
 | GET | `/summary/personal?month=YYYY-MM` | presupuesto de categorías personales + todo lo propio (ingresos, ahorro, promedios, vs. mes anterior completo, aporte a compartidas, últimos movimientos) |
 | GET | `/summary/household?month=YYYY-MM` | categorías compartidas con gasto del grupo y `mySpent`; sin ingresos ni movimientos |

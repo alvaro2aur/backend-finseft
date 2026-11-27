@@ -209,8 +209,9 @@ CREATE TABLE transactions (
   currency      char(3) NOT NULL DEFAULT 'CLP',       -- multi-moneda a futuro
   category_id   uuid,                                 -- NULL = "Sin categoría"
   instrument_id uuid NOT NULL,
-  description   text NOT NULL,
-  source        text NOT NULL DEFAULT 'manual',       -- manual | telegram | import
+  description   text,                                 -- opcional (NULL = sin descripción)
+  merchant      text,                                 -- comercio; lo traen las compras importadas desde la app
+  source        text NOT NULL DEFAULT 'manual',       -- manual | app-android
   external_ref  text,                                 -- para no duplicar importaciones
   created_at    timestamptz NOT NULL DEFAULT now(),
   updated_at    timestamptz NOT NULL DEFAULT now(),

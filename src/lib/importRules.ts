@@ -5,12 +5,16 @@ export function toClpAmount(amountMinor: number, currency: string): number {
   return currency === 'CLP' ? amountMinor : Math.max(1, Math.round(amountMinor / 100));
 }
 
-/** El comercio; sin comercio, la tarjeta. En otra moneda se agrega el monto original para ajustarlo después. */
-export function importDescription(merchant: string | null | undefined, last4: string, amountMinor: number, currency: string): string {
-  const base = merchant?.trim() || `Compra con tarjeta ····${last4}`;
+/**
+ * La descripción que escribió el usuario en la app (ya normalizada por el esquema: null si no escribió nada).
+ * En otra moneda se agrega el monto original, para recordar ajustarlo a pesos.
+ */
+export function importDescription(description: string | null | undefined, amountMinor: number, currency: string): string | null {
+  const base = description ?? null;
   if (currency === 'CLP') return base;
   const original = (amountMinor / 100).toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${base} · ${currency} ${original} (monto original, ajustar a pesos)`;
+  const note = `${currency} ${original} (monto original, ajustar a pesos)`;
+  return base ? `${base} · ${note}` : note;
 }
 
 /** Fecha 'YYYY-MM-DD' de un instante ISO 8601 en la zona horaria dada. */
@@ -27,8 +31,9 @@ export function normalizeMerchant(s: string): string {
 }
 
 /**
- * La misma normalización en SQL sobre `transactions.description`, quitando antes la nota de moneda que
- * agrega importDescription ("… · USD 12,34 (monto original, ajustar a pesos)"). En Postgres `\s` y `trim()`
- * no tratan el NBSP como espacio, por eso se traduce explícitamente (chr(160)).
+ * La misma normalización en SQL. El comercio es `transactions.merchant`; los movimientos sin comercio
+ * (los digitados a mano) usan su descripción, quitando la nota de moneda de las importaciones antiguas
+ * ("… · USD 12,34 (monto original, ajustar a pesos)"). En Postgres `\s` y `trim()` no tratan el NBSP como
+ * espacio, por eso se traduce explícitamente (chr(160)).
  */
-export const MERCHANT_SQL = String.raw`lower(regexp_replace(btrim(translate(regexp_replace(t.description, ' · [A-Z]{3} .*\(monto original, ajustar a pesos\)$', ''), chr(160), ' ')), '[[:space:]]+', ' ', 'g'))`;
+export const MERCHANT_SQL = String.raw`lower(regexp_replace(btrim(translate(COALESCE(t.merchant, regexp_replace(t.description, ' · [A-Z]{3} .*\(monto original, ajustar a pesos\)$', '')), chr(160), ' ')), '[[:space:]]+', ' ', 'g'))`;

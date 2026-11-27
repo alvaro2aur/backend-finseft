@@ -1272,7 +1272,7 @@
               "type": "string",
               "maxLength": 100
             },
-            "description": "Texto en la descripción (sin distinguir mayúsculas; `%` y `_` se tratan como texto)"
+            "description": "Texto en la descripción o el comercio (sin distinguir mayúsculas; `%` y `_` se tratan como texto)"
           },
           {
             "name": "type",
@@ -1698,7 +1698,7 @@
         ],
         "operationId": "importTransactions",
         "summary": "Importar compras capturadas por la app",
-        "description": "Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un egreso digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan \"no reenviar\". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. Otra moneda: `amountMinor` en centésimas, se registra en pesos con una nota.",
+        "description": "Lote de hasta 200 compras. Cada una vuelve con su estado: `created`; `exists` (ya importada, por `externalId`); `discarded` (importada y luego borrada en FinSelf: no se recrea); `rejected` (con código y motivo; una compra inválida no rompe el lote); `possible_duplicate`: hay un egreso digitado a mano con la misma tarjeta y el mismo monto a ±1 día — no se crea y `matches` trae los parecidos; para registrarla igual, reenvíala con `confirmDuplicate: true`. Para la app, `created`, `exists` y `discarded` significan \"no reenviar\". La tarjeta se busca por sus últimos 4 dígitos entre los instrumentos activos (ante dígitos repetidos se prefiere la tarjeta de crédito). La fecha es la de `purchasedAt` en la zona de la app; el período sigue el día de corte de la tarjeta. El comercio queda en `merchant` y la descripción es la que escribió el usuario (`description`, opcional). Otra moneda: `amountMinor` en centésimas, se registra en pesos y se agrega el monto original a la descripción.",
         "security": [
           {
             "bearerAuth": []
@@ -1757,7 +1757,7 @@
         ],
         "operationId": "suggestCategories",
         "summary": "Sugerir categoría por comercio",
-        "description": "Para cada comercio (hasta 200), la categoría que el usuario más usó para él en sus egresos de los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Solo usa los movimientos propios. Sin historial: `categoryId: null`.",
+        "description": "Para cada comercio (hasta 200), la categoría que el usuario más usó para él en sus egresos de los últimos 12 meses (sin distinguir mayúsculas ni espacios sobrantes; ante empate, la más reciente). Compara con el comercio de cada movimiento o, si no tiene, con su descripción. Solo usa los movimientos propios. Sin historial: `categoryId: null`.",
         "security": [
           {
             "bearerAuth": []
@@ -2426,7 +2426,25 @@
             "type": "string"
           },
           "description": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "Comercio; lo traen las compras importadas desde la app"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "categoryId": {
             "anyOf": [
@@ -2472,7 +2490,7 @@
           },
           "source": {
             "type": "string",
-            "description": "manual | telegram | import"
+            "description": "manual | app-android"
           },
           "createdAt": {
             "type": "string",
@@ -2491,6 +2509,7 @@
           "amount",
           "currency",
           "description",
+          "merchant",
           "categoryId",
           "categoryName",
           "categoryScope",
@@ -3071,7 +3090,24 @@
                   "type": "integer"
                 },
                 "description": {
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "merchant": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "categoryName": {
                   "anyOf": [
@@ -3089,6 +3125,7 @@
                 "date",
                 "amount",
                 "description",
+                "merchant",
                 "categoryName"
               ],
               "additionalProperties": false
@@ -3290,6 +3327,18 @@
                   "pattern": "^[A-Z]{3}$"
                 },
                 "merchant": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "description": "Descripción escrita por el usuario en la app",
                   "anyOf": [
                     {
                       "type": "string",
@@ -3713,9 +3762,27 @@
             "maximum": 1000000000000
           },
           "description": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant": {
+            "description": "Comercio (las compras importadas desde la app lo traen)",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "instrumentId": {
             "type": "string",
@@ -3744,7 +3811,6 @@
           "date",
           "type",
           "amount",
-          "description",
           "instrumentId"
         ]
       },
@@ -3768,9 +3834,27 @@
             "maximum": 1000000000000
           },
           "description": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "merchant": {
+            "description": "Comercio (las compras importadas desde la app lo traen)",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "instrumentId": {
             "type": "string",

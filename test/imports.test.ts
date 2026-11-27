@@ -53,7 +53,7 @@ describe('POST /imports/transactions', () => {
     expect(r.json.summary).toEqual({ created: 1, exists: 0, discarded: 0, rejected: 3, possible_duplicate: 0 });
 
     const t = (await api('GET', `/transactions/${ok.transactionId}`, { token: u.user.token })).json;
-    expect(t).toMatchObject({ date: '2026-11-03', type: 'egreso', amount: 12490, description: 'FARMACIA', instrumentId: u.card.id, categoryId: u.category.id, source: 'app-android' });
+    expect(t).toMatchObject({ date: '2026-11-03', type: 'egreso', amount: 12490, merchant: 'FARMACIA', description: null, instrumentId: u.card.id, categoryId: u.category.id, source: 'app-android' });
   });
 
   test('reenviar el mismo lote no duplica', async () => {
@@ -137,7 +137,26 @@ describe('POST /imports/transactions', () => {
     const u = await setupUser();
     const r = (await importItems(u.device, [item(u.category.id, { currency: 'USD', amountMinor: 1234, merchant: 'AMAZON' })])).json.results[0];
     const t = (await api('GET', `/transactions/${r.transactionId}`, { token: u.user.token })).json;
-    expect(t).toMatchObject({ amount: 12, currency: 'CLP', description: 'AMAZON · USD 12,34 (monto original, ajustar a pesos)' });
+    expect(t).toMatchObject({ amount: 12, currency: 'CLP', merchant: 'AMAZON', description: 'USD 12,34 (monto original, ajustar a pesos)' });
+  });
+
+  test('la descripción que escribe el usuario se guarda aparte del comercio', async () => {
+    const u = await setupUser();
+    const [withDesc, blank] = (
+      await importItems(u.device, [
+        item(u.category.id, { merchant: 'JUMBO', description: '  Cumpleaños de Ana ' }),
+        item(u.category.id, { merchant: '  ', description: '   ', purchasedAt: '2026-11-05T15:00:00-03:00' }),
+      ])
+    ).json.results;
+    const get = async (id: string) => (await api('GET', `/transactions/${id}`, { token: u.user.token })).json;
+    expect(await get(withDesc.transactionId)).toMatchObject({ merchant: 'JUMBO', description: 'Cumpleaños de Ana' });
+    expect(await get(blank.transactionId)).toMatchObject({ merchant: null, description: null });
+  });
+
+  test('una descripción de más de 200 caracteres o con NUL rechaza solo esa compra', async () => {
+    const u = await setupUser();
+    const r = (await importItems(u.device, [item(u.category.id, { description: 'x'.repeat(201) }), item(u.category.id, { description: 'a\u0000b' })])).json.results;
+    expect(r.map((x: any) => x.error?.code)).toEqual(['invalid_item', 'invalid_item']);
   });
 
   test('un lote vacío, demasiado grande o que no es lista es un error de todo el lote', async () => {
@@ -163,7 +182,7 @@ describe('posibles duplicados de compras digitadas a mano', () => {
     const before = await count(u.user.token);
     const results = (await importItems(u.device, ['02', '03', '04'].map((d) => item(u.category.id, on(d))))).json.results;
     expect(results.map((r: any) => r.status)).toEqual(['possible_duplicate', 'possible_duplicate', 'possible_duplicate']);
-    expect(results[0].matches).toEqual([{ transactionId: u.manual.id, date: '2026-11-03', amount: 12490, description: 'Farmacia', categoryName: 'Salud' }]);
+    expect(results[0].matches).toEqual([{ transactionId: u.manual.id, date: '2026-11-03', amount: 12490, description: 'Farmacia', merchant: null, categoryName: 'Salud' }]);
     expect(results[0].transactionId).toBeUndefined();
     expect(await count(u.user.token)).toBe(before);
   });
@@ -248,6 +267,18 @@ describe('POST /imports/suggestions', () => {
     const u = await setupUser('sugusd');
     await importItems(u.device, [item(u.category.id, { currency: 'USD', amountMinor: 1234, merchant: 'AMAZON' })]);
     expect((await suggest(u.device, ['Amazon'])).json.suggestions[0]).toEqual({ merchant: 'Amazon', categoryId: u.category.id, uses: 1 });
+  });
+
+  test('usa el comercio del movimiento antes que su descripción', async () => {
+    const u = await setupUser('sugmerch');
+    const otra = await u.post('/categories', { name: 'Regalos' });
+    await importItems(u.device, [item(otra.id, { merchant: 'FALABELLA', description: 'Regalo de Navidad' })]);
+    await u.post('/transactions', { date: '2026-10-10', type: 'egreso', amount: 1000, merchant: 'Falabella', instrumentId: u.card.id, categoryId: otra.id });
+    const s = (await suggest(u.device, ['falabella', 'regalo de navidad'])).json.suggestions;
+    expect(s).toEqual([
+      { merchant: 'falabella', categoryId: otra.id, uses: 2 },
+      { merchant: 'regalo de navidad', categoryId: null, uses: 0 },
+    ]);
   });
 
   test('no usa los movimientos de otros miembros del grupo', async () => {
